@@ -23,7 +23,10 @@ from argparse import ArgumentParser, REMAINDER
 import multiprocessing  
 import json   
 import time
-import datetime
+from datetime import datetime
+
+sys.path.append("../")
+from src.utils import utils
 
 def parse_args():
 	parser = ArgumentParser(description="Offline performance profiler")
@@ -63,6 +66,12 @@ def parse_args():
 													help="Master node (rank 0)'s free port that needs to "
 														"be used for communciation during distributed "
 														"training")
+	# Cluster specific
+	parser.add_argument("--cpu", type=int, default=0,
+													help="Fix max number of CPUs to profile")
+	parser.add_argument("--memory", type=int, default=0,
+													help="Fix max memory to profile")
+
 
 	# The following arguments are expected to be supported by the
 	# training script. Max iterations should supersede epochs.
@@ -73,6 +82,15 @@ def parse_args():
 													help='number of total epochs to run')
 	parser.add_argument("--max-iterations", default=50, type=int,
 													help='max number of minibatches to profile')
+	parser.add_argument("--data", default="./", type=str,
+													help='Path to dataset (blob mnt or local')
+
+
+	# Profiler specific
+	parser.add_argument('--profiler-src', default="/mnt2/jaya/store-aware-packing/src/", type=str,
+													help='Path to the profiler src')
+	parser.add_argument('--container-mnt', default="/datadrive/", type=str,
+													help='Mountpoint in the cointainer where src code is present')
 
 
 	# The user given training script and any optional args to the script
@@ -87,9 +105,92 @@ def parse_args():
 
 args = parse_args()
 
+def print_inputs():
+	print("--------- Offline Sensitivty Profiler ----------")
+	print("Job name = {}".format(args.job_name))
+	print("GPUs = {}".format(args.num_gpus))
+	print("Docker image = {}".format(args.docker_img))
+	print("Workers = {}".format(args.workers))
+	print("Max iterations = {}".format(args.max_iterations))
+	print("Training script = {}".format(args.training_script))
+	print("Training script args = {}".format(args.training_script_args))
+	print("Profile path = {}".format(args.profile_path))
+
+
+def withinTenPercent(orig, current):
+	orig = float(orig)
+	current = float(current)
+	if orig <= 0:
+		return True
+
+	if abs((orig - current)/orig*100) < 10:
+		print("Within 10% of {} and {} is True".format(orig, current))
+		return True
+	print("Within 10% of {} and {} is False".format(orig, current))
+	return False 
+
+def launch_job(job_name, container, cpu, memory, script, script_args, out_dir):
+	monitor = utils.Monitor(name = job_name)
+	cmd = "nvidia-docker run " + \
+				" --ipc={}".format("host") + \
+				" --mount src={},target={},type={}".format("/", args.container_mnt, \
+				"bind")+\
+				" -it" + \
+				" --rm" + \
+				" --network={}".format("host") + \
+				" --cpus=\"{}\"".format(cpu) + \
+				" --cpuset-cpus={}-{}".format(0, cpu-1) + \
+				" --memory={}g".format(memory) + \
+				" --privileged" + \
+				" -e \"OUT_DIR=\"{}\"\"".format(out_dir) + \
+				" " + container + \
+				" /bin/bash -c " + \
+				" \'cd {}; ".format(args.container_mnt + args.profiler_src) + \
+				" export PYTHONPATH=\"$PYTHONPATH:{}\";".format(args.container_mnt + args.profiler_src) + \
+				" echo $PYTHONPATH; " + \
+				" python -m profiler.launch" + \
+				" --nproc_per_node={}".format(args.num_gpus) + \
+				" " + script + \
+				" " + ' '.join(map(str, script_args)) + \
+				" --workers={}".format(int(cpu/args.num_gpus)) + \
+				" --job-name={}".format(job_name) + "\'"
+
+	print(cmd)
+	process = subprocess.Popen(cmd, env = os.environ.copy(), shell=True)
+	process.wait()
+	res = monitor.peekLog()
+	return res[0]
+
+
+
+def profile_cpu(num_cpus=0):
+	actual_num_cpus = multiprocessing.cpu_count()
+	if num_cpus <= 0 or num_cpus > actual_num_cpus:
+		num_cpus = actual_num_cpus
+	print(num_cpus)
+	 
+	res = -1
+	cpu_to_profile = num_cpus
+	while True:
+		start = time.time()
+		job_name = args.job_name + "_cpu_" + str(cpu_to_profile)
+		cur_res = launch_job(job_name, args.docker_img, cpu_to_profile, 500, args.training_script, args.training_script_args, "./")
+		#break
+		if withinTenPercent(res, cur_res):
+			cpu_to_profile = cpu_to_profile/2
+			res = cur_res
+		else:
+			cpu_to_profile = cpu_to_profile - 1
+			res = cur_res
+		
+		dur = time.time() - start
+		print("Time to explore {} = {}s".format(job_name, dur))
+		if cpu_to_profile < 1:
+			break
+		
+		
 
 def main():
-	print_header()
 	
 	# Create output json profile
 	dateTimeObj = datetime.now()
@@ -102,8 +203,9 @@ def main():
 		if e.errno != errno.EEXIST:
 			raise
 
+	print_inputs()
 	
-
+	profile_cpu(num_cpus=args.cpu)
 
 if __name__ == "__main__":
 	main()
