@@ -152,7 +152,7 @@ def get_dataset_stats(dir_path):
 	(output,err)=process.communicate()
 	exit_code = process.wait()
 	if exit_code != 0:
-		return 0, 1889601
+		return 555, 1889601
 	
 	size = output.decode('utf-8').split()[0][:-1]
 
@@ -235,8 +235,8 @@ def profile_cpu(num_cpus=0):
 	while True:
 		start = time.time()
 		job_name = args.job_name + "_cpu_" + str(cpu_to_profile)
-		#cur_res = launch_job(job_name, args.docker_img, cpu_to_profile, 500, args.training_script, args.training_script_args, "./") 
-		cur_res = launch_job_dummy_oi(cpu_to_profile)
+		cur_res = launch_job(job_name, args.docker_img, cpu_to_profile, 500, args.training_script, args.training_script_args, "./") 
+		#cur_res = launch_job_dummy_oi(cpu_to_profile)
 		cur_res = cur_res * num_iters
 		print("Epoch time = {}, num_iters={}".format(cur_res, num_iters))
 		cpu_profile_points[cpu_to_profile] = cur_res

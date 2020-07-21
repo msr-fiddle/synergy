@@ -5,7 +5,8 @@ import time
 import math
 import sys 
 
-from utils import utils
+from utils import utilities
+#from utilities import Register
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -186,7 +187,7 @@ best_prec1 = 0
 args = parser.parse_args()
 
 if args.local_rank == 0:
-    register_handle = utils.Register(name=args.job_name)
+    register_handle = utilities.Register(name=args.job_name)
 print(args.data)
 
 # test mode, use default args for sanity test
