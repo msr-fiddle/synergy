@@ -1,0 +1,13 @@
+MEM*
+STR*
+PERF*
+memtest
+profiles
+profiles/*
+*.log
+*.out
+*.csv
+*.txt
+*.pyc
+**/*.pyc
+__pycache__
