@@ -3,7 +3,10 @@ import os
 import shutil
 import time
 import math
+import sys 
 
+from utils import utilities
+#from utilities import Register
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -34,12 +37,13 @@ try:
 except ImportError:
     raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
+
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training using DALI')
-parser.add_argument('data', metavar='DIR', nargs='*',
+parser.add_argument('--data', metavar='DIR', default="./", type=str, #nargs='*',
                     help='path(s) to dataset (if one path is provided, it is assumed\n' +
                     'to have subdirectories named "train" and "val"; alternatively,\n' +
                     'train and val paths can be specified directly by providing both paths as arguments)')
@@ -48,6 +52,8 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                     help='model architecture: ' +
                     ' | '.join(model_names) +
                     ' (default: resnet18)')
+
+parser.add_argument('--job-name',  default="job-0", type=str)
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=3, type=int, metavar='N',
@@ -86,6 +92,7 @@ parser.add_argument('--prof', dest='prof', action='store_true',
 parser.add_argument('-t', '--test', action='store_true',
                     help='Launch test mode with preset arguments')
 
+parser.add_argument("--max-iterations", default=-1, type=int)
 parser.add_argument("--local_rank", default=0, type=int)
 parser.add_argument("--classes", default=1000, type=int)
 parser.add_argument("--cache_size", default=0, type=int)
@@ -178,6 +185,10 @@ class HybridValPipe(Pipeline):
 
 best_prec1 = 0
 args = parser.parse_args()
+
+if args.local_rank == 0:
+    register_handle = utilities.Register(name=args.job_name)
+print(args.data)
 
 # test mode, use default args for sanity test
 if args.test:
@@ -329,12 +340,14 @@ def main():
             print("=> no checkpoint found at '{}'".format(args.resume))
 
     # Data loading code
-    if len(args.data) == 1:
-        traindir = os.path.join(args.data[0], 'train')
-        valdir = os.path.join(args.data[0], 'val')
-    else:
-        traindir = args.data[0]
-        valdir= args.data[1]
+    traindir = os.path.join(args.data, 'train')
+    valdir = os.path.join(args.data, 'val')
+    #if len(args.data) == 1:
+    #    traindir = os.path.join(args.data[0], 'train')
+    #    valdir = os.path.join(args.data[0], 'val')
+    #else:
+    #    traindir = args.data[0]
+    #    valdir= args.data[1]
 
     if args.dali:
         if(args.arch == "inception_v3"):
@@ -403,8 +416,12 @@ def main():
 
         # train for one epoch
 
-        avg_train_time = train(train_loader, model, criterion, optimizer, epoch)
-        total_time.update(avg_train_time)
+        avg_batch_time = train(train_loader, model, criterion, optimizer, epoch)
+        total_time.update(avg_batch_time)
+        if args.max_iterations > 0:
+            print("Batch Time : {}s".format(avg_batch_time))
+            return
+
         if args.prof:
             break
         # evaluate on validation set
@@ -456,6 +473,8 @@ def main():
         del pipe
         del pipe_val 
 
+    return total_time.avg
+
 
 def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
@@ -486,15 +505,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         adjust_learning_rate(optimizer, epoch, i, train_loader_len)
        
-        if i == 10:
-            os.system("nvidia-smi")
+        #if i == 10:
+        #    os.system("nvidia-smi")
    
         if args.prof:
             if i > 10:
                 break
 
-        #if i == 200:
-        #    break
+        if args.max_iterations > 0 and i == args.max_iterations:
+            break
         # measure data loading time
         data_time.update(time.time() - end)
         dataset_time += (time.time() - end)
@@ -535,11 +554,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
         compute_time += (time.time() - compute_start)
 
         # measure elapsed time
-        batch_time.update(time.time() - end)
+        if i > 10:		
+            batch_time.update(time.time() - end)
 
         end = time.time()
 
-        if args.local_rank == 0 and i % args.print_freq == 0 and i > 1:
+        if args.local_rank == 0 and i % args.print_freq == 0 and i > 10:
+            register_handle.log_update(batch_time.avg, i, epoch)
+      
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Speed {3:.3f} ({4:.3f})\t'
