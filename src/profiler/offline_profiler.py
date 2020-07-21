@@ -1,18 +1,19 @@
 """
 An offline profiler that varies CPU and memory and records job performance
 
-Input :  1. Job script
-				 2. Number of GPUs
-				 3. Docker container image
-				 4. Assumes that the following parameters are exposed:
-						a. Num iterations to stop at ( --max_iterations)
-						b. Data path ( --data)
-						c. Num parallel data workers ( --workers)
+Input : 
+	 1. Job script
+	 2. Number of GPUs
+	 3. Docker container image
+	 4. Assumes that the following parameters are exposed:
+			a. Num iterations to stop at ( --max_iterations)
+			b. Data path ( --data)
+			c. Num parallel data workers ( --workers)
 
 Output :	
-					Performance_profile_<job_name>_<timestamp>.json
-						1. Empirical perf with varying CPU
-						2. Predicted perf with varying memory
+	Performance_profile_<job_name>_<timestamp>.json
+		1. Empirical perf with varying CPU
+		2. Predicted perf with varying memory
 """
 
 
@@ -45,71 +46,66 @@ def parse_args():
 	# The user inputs docker-img, num-gpus, training script and its args
  	
 	parser.add_argument("--docker-img", type=str, default=None,
-														help="Docker image to use for the job")
+		help="Docker image to use for the job")
 	parser.add_argument("--num-gpus", type=int, default=1,
-														help="Number of GPUs req by the job")
+		help="Number of GPUs req by the job")
 	parser.add_argument("--job-name", type=str, default="job-0",
-														help="Unique named identifier for the job")
+		help="Unique named identifier for the job")
 	parser.add_argument("--nnodes", type=int, default=1,       
-														help="The number of nodes to use for distributed "  
-														"training")
+		help="The number of nodes to use for distributed "  
+		"training")
 	parser.add_argument("--node_rank", type=int, default=0, 
-														help="The rank of the node for multi-node" 
-														"distributed training")  
-	parser.add_argument("--nproc_per_node", type=int, default=1,
-													help="The number of processes to launch on each node, "
-														"for GPU training, this is recommended to be set "
-														"to the number of GPUs in your system so that "
-														"each process can be bound to a single GPU.")
+		help="The rank of the node for multi-node" 
+		"distributed training")  
 	parser.add_argument("--master_addr", default="127.0.0.1", type=str,
-													help="Master node (rank 0)'s address, should be either"
-														"the IP address or the hostname of node 0, for "
-														"single node multi-proc training, the "
-														"--master_addr can simply be 127.0.0.1")
+		help="Master node (rank 0)'s address, should be either"
+		"the IP address or the hostname of node 0, for "
+		"single node multi-proc training, the "
+		"--master_addr can simply be 127.0.0.1")
 	parser.add_argument("--master_port", default=29500, type=int,
-													help="Master node (rank 0)'s free port that needs to "
-														"be used for communciation during distributed "
-														"training")
+		help="Master node (rank 0)'s free port that needs to "
+		"be used for communciation during distributed "
+		"training")
 	# Cluster specific
 	parser.add_argument("--cpu", type=int, default=0,
-													help="Fix max number of CPUs to profile")
+		help="Fix max number of CPUs to profile")
 	parser.add_argument("--memory", type=int, default=500,
-													help="Fix max memory to profile")
+		help="Fix max memory to profile")
 
 
 	# The following arguments are expected to be supported by the
 	# training script. Max iterations should supersede epochs.
 	# It is set to -1 by default in the script to ignore iter count
 	parser.add_argument('-j', '--workers', default=3, type=int, metavar='N',
-													help='number of data loading workers')
+		help='number of data loading workers')
 	parser.add_argument('-b', '--batch-size', default=256, type=int, metavar='N',
-													help='Per-gpu batch size')
+		help='Per-gpu batch size')
 	parser.add_argument('--epochs', default=1, type=int, metavar='N',
-													help='number of total epochs to run')
+		help='number of total epochs to run')
 	parser.add_argument("--max-iterations", default=50, type=int,
-													help='max number of minibatches to profile')
+		help='max number of minibatches to profile')
 	parser.add_argument("--data", default="./", type=str,
-													help='Path to dataset (blob mnt or local')
+		help='Path to dataset (blob mnt or local')
 	parser.add_argument("--str-bw", default="./STR_BW", type=str,
-													help='Path to dataset (blob mnt or local')
+		help='Path to dataset (blob mnt or local')
 	parser.add_argument("--mem-thr", default="./MEM_THR", type=str,
-													help='Path to dataset (blob mnt or local')
+		help='Path to dataset (blob mnt or local')
 
 
 	# Profiler specific
 	parser.add_argument('--profiler-src', default="/mnt2/jaya/store-aware-packing/src/", type=str,
-													help='Path to the profiler src')
+		help='Path to the profiler src')
 	parser.add_argument('--container-mnt', default="/datadrive/", type=str,
-													help='Mountpoint in the cointainer where src code is present')
+		help='Mountpoint in the cointainer where src code is present')
 	parser.add_argument('--local-disk', default="/mnt2", type=str,
-													help='Local disk mount point')
+		help='Local disk mount point')
 
 	# The user given training script and any optional args to the script
 	parser.add_argument("training_script", type=str, 
-													help="The full path to the single GPU training " 
-														"program/script to be launched in parallel, "
-														"followed by all the arguments for the "
-														"training script") 
+		help="The full path to the single GPU training " 
+		"program/script to be launched in parallel, "
+		"followed by all the arguments for the "
+		"training script") 
 	parser.add_argument('training_script_args', nargs=REMAINDER)
 
 	return parser.parse_args()
@@ -348,9 +344,9 @@ def estimate_speed(cpu, mem, max_time):
 	#
 	disk_bw = strProfileExists() #Get it from file or envt
 	mem_thr = memProfileExists(cpu) # Get from file
-	dataset_size  = 555
+	dataset_size  = args.dataset_size
 	#dataset_size  = 140
-	total_samples = 1889601
+	total_samples = args.num_samples
 	#total_samples = 1281167
 	cache_size = float(mem)/100.0*dataset_size 
 	disk_fetch_size = dataset_size - cache_size
