@@ -1,4 +1,23 @@
+## TODO
 
+1. Improve the CPU datapoint search algo :  Currently it is:
+  ```
+  cpu = MAX_CPU
+  prev_perf = -1
+  while cpu > 0:
+    perf = run(cpu)
+    if within10Percent(perf, prev_perf) and prev_perf >= 0:
+      cpu = cpu/2     # take a big step 
+    else
+      cpu = cpu - 1   # take a small step
+  ```
+  
+  2. Haven't tested profiling in multi-server settings
+  3. Compare profiling results with empirical runs for different models
+  4. Fix 7-10 different models and get their profiles to be used by the scheduler-simulator
+  5. Export profiler output as json. Currently simply prints out a perf matrix.
+  6. Consider impact of data locality
+     
 
 ## Using the profiler
 
