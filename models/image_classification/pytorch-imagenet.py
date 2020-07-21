@@ -185,7 +185,8 @@ class HybridValPipe(Pipeline):
 best_prec1 = 0
 args = parser.parse_args()
 
-register_handle = utils.Register(name=args.job_name)
+if args.local_rank == 0:
+    register_handle = utils.Register(name=args.job_name)
 print(args.data)
 
 # test mode, use default args for sanity test
@@ -503,8 +504,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         adjust_learning_rate(optimizer, epoch, i, train_loader_len)
        
-        if i == 10:
-            os.system("nvidia-smi")
+        #if i == 10:
+        #    os.system("nvidia-smi")
    
         if args.prof:
             if i > 10:
