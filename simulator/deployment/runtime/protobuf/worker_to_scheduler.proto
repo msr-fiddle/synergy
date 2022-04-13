@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+import "common.proto";
+
+service WorkerToScheduler {
+    rpc RegisterWorker (RegisterWorkerRequest) returns (RegisterWorkerResponse);
+}
+
+message RegisterWorkerRequest {
+    uint32 num_gpus = 1;
+    string ip_addr = 2;
+    uint32 port = 3;
+}
+
+message RegisterWorkerResponse {
+    bool success = 1;
+    uint64 round_duration = 2;
+    uint64 machine_id = 3;
+}

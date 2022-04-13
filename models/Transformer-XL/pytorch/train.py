@@ -32,16 +32,21 @@ import yaml
 from apex import amp
 from torch.nn.parallel import DistributedDataParallel
 
+sys.path.append('./')
+sys.path.append('./src')
+from utils.utilities import Register
+
 import lamb
-import utils
+import utils_tx
 from data_utils import get_lm_corpus
 from mem_transformer import MemTransformerLM
-from utils.data_parallel import BalancedDataParallel
-from utils.exp_utils import AverageMeter
-from utils.exp_utils import benchmark
-from utils.exp_utils import create_exp_dir
-from utils.exp_utils import log_env_info
+from utils_tx.data_parallel import BalancedDataParallel
+from utils_tx.exp_utils import AverageMeter
+from utils_tx.exp_utils import benchmark
+from utils_tx.exp_utils import create_exp_dir
+from utils_tx.exp_utils import log_env_info
 
+from iterator.synergy_iterator import SynergyIterator
 
 def parse_args():
     parent_parser = argparse.ArgumentParser(
@@ -53,8 +58,8 @@ def parse_args():
     parser = argparse.ArgumentParser(parents=[parent_parser], add_help=True)
     cfg_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 
-    cfg_parser.add_argument('--config', default=None)
-    cfg_parser.add_argument('--config_file', default=None)
+    cfg_parser.add_argument('--config', default='default')
+    cfg_parser.add_argument('--config_file', default='wt103_base.yaml')
     #cfg_parser.add_argument('--config', default='default')
     #cfg_parser.add_argument('--config_file', default='config.yaml')
 
@@ -181,7 +186,7 @@ def parse_args():
     training = parser.add_argument_group('training setup')
     training.add_argument('--max_step', type=int, default=40000,
                           help='Max number of training steps')
-    training.add_argument('--batch_size', type=int, default=256,
+    training.add_argument('-b', '--batch_size', type=int, default=128,
                           help='Global batch size')
     training.add_argument('--local_batch_size', type=int, default=None,
                           help='Local (per-device) batch size, this setting \
@@ -211,6 +216,16 @@ def parse_args():
                           help='Use the same attn length for all tokens')
     training.add_argument('--varlen', action='store_true',
                           help='Use variable length')
+
+    training.add_argument('--job-name',  default="job-0", type=str)
+    training.add_argument('--src',  default="./", type=str)
+    training.add_argument('-j', '--workers', default=3, type=int, help='number of data loading workers')
+    training.add_argument("--max-iterations", default=-1, type=int)
+    training.add_argument("--nnodes", default=1, type=int) 
+    training.add_argument("--node_rank", default=0, type=int)
+    training.add_argument('--synergy', action='store_true') 
+    training.add_argument('--noeval', action='store_true', default=False) 
+
 
     val = parser.add_argument_group('validation setup')
     val.add_argument('--eval_tgt_len', type=int, default=192,
@@ -260,7 +275,7 @@ def save_checkpoint(args, model, model_config, optimizer, scheduler, vocab,
         'best_val_loss': best_val_loss,
         }
 
-    with utils.distributed.sync_workers() as rank:
+    with utils_tx.distributed.sync_workers() as rank:
         path = os.path.join(work_dir, name)
         logging.info(f'Saving checkpoint to {path}')
         if rank == 0:
@@ -387,7 +402,7 @@ def evaluate(eval_iter, model, args):
 
 def train(tr_iter, va_iter, model, para_model, model_config, optimizer,
           optimizer_sparse, scheduler, scheduler_sparse, vocab, epoch, train_step,
-          best_val_loss, meters, args):
+          best_val_loss, meters, args, register_handle=None):
     # Turn on training mode which enables dropout.
     model.train()
 
@@ -398,6 +413,10 @@ def train(tr_iter, va_iter, model, para_model, model_config, optimizer,
 
     mems = [None for _ in range(args.batch_chunk)]
     train_iter = tr_iter.get_varlen_iter() if args.varlen else tr_iter
+
+    if args.synergy:
+        train_iter = SynergyIterator(train_iter, bs=args.batch_size)
+
 
     for batch, (data, target, seq_len, _) in enumerate(train_iter):
         log_step += 1
@@ -450,20 +469,31 @@ def train(tr_iter, va_iter, model, para_model, model_config, optimizer,
             if scheduler_sparse:
                 scheduler_sparse.step(train_step)
 
+        if args.max_iterations > 0 and train_step >= args.max_iterations: 
+            break
+
+
+
         if train_step % args.log_interval == 0:
+
             cur_loss = train_loss / log_step
-            cur_loss = utils.distributed.all_reduce_item(cur_loss, op='mean')
+            cur_loss = utils_tx.distributed.all_reduce_item(cur_loss, op='mean')
             train_loss = 0
 
             elapsed = time.time() - log_start_time
             avg_elapsed = elapsed / log_step
-            avg_elapsed = utils.distributed.all_reduce_item(avg_elapsed, op='max')
+            avg_elapsed = utils_tx.distributed.all_reduce_item(avg_elapsed, op='max')
             log_start_time = time.time()
             log_step = 0
 
+
+            if args.local_rank == 0 and train_step > 10:
+                register_handle.log_update(avg_elapsed, train_step, epoch)
+
+
             lr = optimizer.param_groups[0]['lr']
             throughput = target_tokens / elapsed
-            throughput = utils.distributed.all_reduce_item(throughput, op='sum')
+            throughput = utils_tx.distributed.all_reduce_item(throughput, op='sum')
             meters['train_throughput'].update(throughput)
             target_tokens = 0
 
@@ -498,10 +528,10 @@ def train(tr_iter, va_iter, model, para_model, model_config, optimizer,
             logging.info(log_str)
             dllogger.log(step=train_step, data=dllogger_data)
 
-        if train_step % args.eval_interval == 0:
+        if train_step % args.eval_interval == 0 and not args.noeval:
             eval_start_time = time.time()
             val_loss = evaluate(va_iter, model, args)
-            val_loss = utils.distributed.all_reduce_item(val_loss, op='mean')
+            val_loss = utils_tx.distributed.all_reduce_item(val_loss, op='mean')
 
             logging.info('-' * 100)
             log_str = '| Eval {:3d} at step {:>8d} | time: {:5.2f}s ' \
@@ -566,27 +596,32 @@ def train(tr_iter, va_iter, model, para_model, model_config, optimizer,
 
 def main():
     args = parse_args()
+  
+    if args.local_rank == 0:
+        register_handle = Register(name=args.job_name)
+    else:
+        register_handle = None
 
     # Initialize device and distributed backend
     torch.cuda.set_device(args.local_rank)
     device = torch.device('cuda' if args.cuda else 'cpu')
-    utils.distributed.init_distributed(args.cuda)
+    utils_tx.distributed.init_distributed(args.cuda)
 
-    args.work_dir = utils.exp_utils.build_work_dir_name(args.work_dir,
+    args.work_dir = utils_tx.exp_utils.build_work_dir_name(args.work_dir,
                                                         args.dataset,
                                                         args.append_dataset,
                                                         args.append_time,
                                                         )
 
-    with utils.distributed.sync_workers() as rank:
+    with utils_tx.distributed.sync_workers() as rank:
         if rank == 0:
             create_exp_dir(args.work_dir,
-                           scripts_to_save=['train.py', 'mem_transformer.py'],
+                           scripts_to_save=[args.src + 'train.py', args.src + 'mem_transformer.py'],
                            debug=args.debug)
 
     # Setup logging
     if args.log_all_ranks:
-        log_file = f'train_log_rank_{utils.distributed.get_rank()}.log'
+        log_file = f'train_log_rank_{utils_tx.distributed.get_rank()}.log'
     else:
         log_file = f'train_log.log'
     dllog_file = f'train_log.json'
@@ -597,13 +632,13 @@ def main():
         log_file = os.devnull
         dllog_file = os.devnull
 
-    utils.exp_utils.setup_logging(log_all_ranks=args.log_all_ranks,
+    utils_tx.exp_utils.setup_logging(log_all_ranks=args.log_all_ranks,
                                   filename=log_file,
                                   )
-    utils.exp_utils.setup_dllogger(enabled=True, filename=dllog_file)
+    utils_tx.exp_utils.setup_dllogger(enabled=True, filename=dllog_file)
 
     if args.local_batch_size is not None:
-        world_size = utils.distributed.get_world_size()
+        world_size = utils_tx.distributed.get_world_size()
         args.batch_size = world_size * args.local_batch_size
         logging.info(f'--local_batch_size was set, adjusting global batch size'
                      f' to {args.batch_size} (local_batch_size * world_size)')
@@ -850,8 +885,7 @@ def main():
             train_step, best_val_loss = train(
                 tr_iter, va_iter, model, para_model, model_config, optimizer,
                 optimizer_sparse, scheduler, scheduler_sparse, vocab, epoch,
-                train_step, best_val_loss, meters, args
-                )
+                train_step, best_val_loss, meters, args, register_handle=register_handle)
             print("EPOCH DUR = {}".format(time.time() - ep_start))
             if train_step == args.max_step:
                 logging.info('-' * 100)
@@ -871,7 +905,7 @@ def main():
     ###########################################################################
     summary = {}
     test_path = os.path.join(args.work_dir, 'checkpoint_best.pt')
-    if not args.debug and os.path.exists(test_path):
+    if not args.debug and os.path.exists(test_path) and not args.noeval:
         # Load the best saved model.
         checkpoint = load_checkpoint(test_path)
         model.load_state_dict(checkpoint['model_state'])
@@ -879,7 +913,7 @@ def main():
         # Run on test data.
         test_start_time = time.time()
         test_loss = evaluate(te_iter, model, args)
-        test_loss = utils.distributed.all_reduce_item(test_loss, 'mean')
+        test_loss = utils_tx.distributed.all_reduce_item(test_loss, 'mean')
         test_elapsed = time.time() - test_start_time
 
         logging.info('=' * 100)

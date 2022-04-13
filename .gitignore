@@ -1,0 +1,11 @@
+**/**/chk*
+**/**/*.log
+**/**/*.out
+**/**/*.jpeg
+
+**/**/*.txt
+**/**/*profiles*
+**/**/*result*
+**/**/*docker*
+**/**/*cache*
+./docker/

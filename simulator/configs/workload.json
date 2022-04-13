@@ -1,0 +1,6 @@
+{
+    "model": resnet-50,
+    "gpus": 1,
+    "iteration-time": 0.05 seconds,
+    
+}

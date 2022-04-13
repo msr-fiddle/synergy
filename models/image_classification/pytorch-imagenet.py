@@ -1,11 +1,13 @@
 import argparse
-import os
+import os, errno
 import shutil
 import time
 import math
 import sys 
-
-from utils import utilities
+sys.path.append('./')
+sys.path.append('./src')
+from utils.utilities import Register
+from iterator.synergy_iterator import SynergyIterator
 #from utilities import Register
 import torch
 from torch.autograd import Variable
@@ -74,6 +76,8 @@ parser.add_argument('--nopin', action='store_false', help='Use this '
                                  'argument to disable memory pinning')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
+parser.add_argument('--chk_dir', default='./chk/', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: ./chk)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
@@ -112,6 +116,8 @@ parser.add_argument('--mint', action='store_true')
 parser.add_argument('--dali', action='store_true')
 parser.add_argument('--node_ip_list', action='append', type=str, help='Enter IP of other nodes in order')  
 parser.add_argument('--node_port_list', action='append', type=int, help='Enter start port of other nodes in order') 
+parser.add_argument('--synergy', action='store_true')
+parser.add_argument('--step-lr', action='store_true')
 
 
 cudnn.benchmark = True
@@ -120,14 +126,17 @@ compute_time_list = []
 data_time_list = []
 
 class HybridTrainPipe(Pipeline):
-    def __init__(self, batch_size, num_threads, device_id, data_dir, crop, dali_cpu=False):
+    def __init__(self, batch_size, num_threads, device_id, data_dir, crop, dali_cpu=False, resume_index=0, resume_epoch=0):
         super(HybridTrainPipe, self).__init__(batch_size, num_threads, device_id, seed=12 + device_id)
 
         shard = int(args.node_rank*args.world_size/args.nnodes + args.local_rank)
         if args.mint:
-            self.input = ops.FileReader(file_root=data_dir, shard_id=shard, num_shards=args.world_size, shuffle_after_epoch=True, cache_size=args.cache_size, shuffle_seed=args.shuffle_seed)
+            self.input = ops.FileReader(file_root=data_dir, shard_id=shard, num_shards=args.world_size, shuffle_after_epoch=True, cache_size=args.cache_size, shuffle_seed=args.shuffle_seed, debug=True)
         else:
-            self.input = ops.FileReader(file_root=data_dir, shard_id=shard, num_shards=args.world_size, shuffle_after_epoch=True, shuffle_seed=args.shuffle_seed)
+            #if not resume_index and not resume_epoch:
+            synergy_det=True
+            print("SYNERGY DETERMINISTIC SHUFFLING is {}".format(synergy_det))
+            self.input = ops.FileReader(file_root=data_dir, shard_id=shard, num_shards=args.world_size, shuffle_after_epoch=True, shuffle_seed=args.shuffle_seed, debug=True, resume_index=resume_index, resume_epoch=resume_epoch, synergy_det=synergy_det)
         #let user decide which pipeline works him bets for RN version he runs
         dali_device = 'cpu' if dali_cpu else 'gpu'
         #decoder_device = 'cpu' 
@@ -187,7 +196,7 @@ best_prec1 = 0
 args = parser.parse_args()
 
 if args.local_rank == 0:
-    register_handle = utilities.Register(name=args.job_name)
+    register_handle = Register(name=args.job_name)
 print(args.data)
 
 # test mode, use default args for sanity test
@@ -242,6 +251,8 @@ def main():
     global best_prec1, args
 
     time_stat = []
+    acc_list = []
+    time_list = []
     start = time.time()
 
     args.gpu = 0
@@ -269,6 +280,11 @@ def main():
         if not args.fp16:
             print("Warning:  if --fp16 is not used, static_loss_scale will be ignored.")
 
+    try:
+        os.makedirs(args.chk_dir)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
 
 
     if args.sync_bn:
@@ -292,7 +308,7 @@ def main():
     if args.fp16:
         model = network_to_half(model)
 
-
+    args.lr = args.lr*float(args.batch_size*args.world_size)/256.
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -323,21 +339,29 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
-
+    
 
     # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume, map_location=lambda storage, loc: storage.cuda(args.gpu))
+    args.start_index = 0
+    args.steps_so_far = 0
+    chk_path = os.path.join(args.chk_dir, 'model.chk')
+    print("CHK Path = {}".format(chk_path))
+    if os.path.exists(chk_path):
+        args.resume = True
+        if os.path.isfile(chk_path):
+            print("=> loading checkpoint '{}'".format(chk_path))
+            checkpoint = torch.load(chk_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
             args.start_epoch = checkpoint['epoch']
+            args.start_index = checkpoint['iter']*args.batch_size
+            args.steps_so_far = checkpoint['steps_so_far']
+            args.shuffle_seed = checkpoint['dl_shuffle_seed']
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+            print("=> loaded checkpoint '{}' (epoch {}, iter {})"
+                  .format(chk_path, checkpoint['epoch'], checkpoint['iter']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            print("=> no checkpoint found at '{}'".format(chk_path))
 
     # Data loading code
     traindir = os.path.join(args.data, 'train')
@@ -349,6 +373,8 @@ def main():
     #    traindir = args.data[0]
     #    valdir= args.data[1]
 
+    train_pipe = None
+
     if args.dali:
         if(args.arch == "inception_v3"):
             crop_size = 299
@@ -357,14 +383,27 @@ def main():
             crop_size = 224
             val_size = 256
 
-        pipe = HybridTrainPipe(batch_size=args.batch_size, num_threads=args.workers, device_id=args.local_rank, data_dir=traindir, crop=crop_size, dali_cpu=args.dali_cpu)
+        if not args.synergy:
+            args.start_index = 0
+            pipe = HybridTrainPipe(batch_size=args.batch_size, num_threads=args.workers, device_id=args.local_rank, data_dir=traindir, crop=crop_size, dali_cpu=args.dali_cpu)
+        else:
+            pipe = HybridTrainPipe(batch_size=args.batch_size, num_threads=args.workers, device_id=args.local_rank, data_dir=traindir, crop=crop_size, dali_cpu=args.dali_cpu, resume_index=args.start_index, resume_epoch=args.start_epoch)
+
         pipe.build()
-        train_loader = DALIClassificationIterator(pipe, size=int(pipe.epoch_size("Reader") / args.world_size))
+        train_pipe = pipe
+
+        #number of samples for this resumed epoch. If full epoch, resume_size = size
+        resume_size = int(pipe.epoch_size("Reader") / args.world_size) - args.start_index 
+        print("Train Loader size = {}, resume_size = {}".format(pipe.epoch_size("Reader") / args.world_size, resume_size)) 
+        train_loader = DALIClassificationIterator(pipe, size=int(pipe.epoch_size("Reader") / args.world_size), fill_last_batch=False, resume_size=resume_size)
+        if  args.synergy:
+            train_loader = SynergyIterator(train_loader, worker_id=args.local_rank, bs=args.batch_size, steps_this_epoch=int(args.start_index/args.batch_size), epoch=args.start_epoch, dali=args.dali)
+        #train_loader = SynergyIterator(train_loader, worker_id=args.local_rank, bs=args.batch_size, steps_this_epoch=int(args.start_index/args.batch_size), epoch=args.start_epoch, dali=args.dali)
 
         if not args.noeval:
             pipe_val = HybridValPipe(batch_size=args.batch_size, num_threads=args.workers, device_id=args.local_rank, data_dir=valdir, crop=crop_size, size=val_size)
             pipe_val.build()
-            val_loader = DALIClassificationIterator(pipe_val, size=int(pipe_val.epoch_size("Reader") / args.world_size))
+            val_loader = DALIClassificationIterator(pipe_val, size=int(pipe_val.epoch_size("Reader") / args.world_size), fill_last_batch=False)
 
     else:
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -410,13 +449,20 @@ def main():
         if args.local_rank == 0 and epoch == 0:
             os.system("swapoff -a")
             os.system("free -g") 
+        if args.local_rank == 0 and args.dali:
+            shuffle_order = train_pipe.index_list("Reader")
+            fname = 'shuffle-epoch-' + str(epoch) + '.log'
+            with open(fname, 'w+') as sf:
+                for idx, ftuple in enumerate(shuffle_order):
+                    sf.write(str(idx) + ',' + ftuple[0] + '\n')
              
         # log timing
         start_ep = time.time()
 
         # train for one epoch
+        avg_batch_time, iteration = train(train_loader, model, criterion, optimizer, epoch)
+        print("Train returned : {}".format(iteration))
 
-        avg_batch_time = train(train_loader, model, criterion, optimizer, epoch)
         total_time.update(avg_batch_time)
         if args.max_iterations > 0:
             print("Batch Time : {}s".format(avg_batch_time))
@@ -424,39 +470,57 @@ def main():
 
         if args.prof:
             break
-        # evaluate on validation set
-        if args.noeval:
-            [prec1, prec5] = [0,0]
-        else:
-            [prec1, prec5] = validate(val_loader, model, criterion)
+
+        # evaluate on validation set if epoch boundary
+        if iteration == 0:
+            if args.noeval:
+                [prec1, prec5] = [0,0]
+            else:
+                [prec1, prec5] = validate(val_loader, model, criterion)
+            acc_list.append(prec1)
 
         # remember best prec@1 and save checkpoint
         if args.local_rank == 0:
             is_best = prec1 > best_prec1
             best_prec1 = max(prec1, best_prec1)
-            '''
+            #Epoch starts from 0
+            if iteration > 0:
+                epoch_save = epoch
+            else:
+                epoch_save = epoch + 1
             save_checkpoint({
-                'epoch': epoch + 1,
+                'epoch': epoch_save,
                 'arch': args.arch,
+                'iter': iteration,
+                'steps_so_far': args.steps_so_far,
+                'dl_shuffle_seed': args.shuffle_seed,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
                 'optimizer': optimizer.state_dict(),
-            }, is_best)
-            '''
+            }, is_best, filename=chk_path)
+            
             if epoch == args.epochs - 1:
                 print('##Top-1 {0}\n'
                       '##Top-5 {1}\n'
                       '##Perf  {2}'.format(prec1, prec5, args.total_batch_size / total_time.avg))
+
+
+
+        dur_ep = time.time() - start_ep
+        print("EPOCH DURATION = {}".format(dur_ep))
+        time_stat.append(dur_ep)
+
+        if iteration == 0:
+            time_list.append(dur_ep)
+
+        if train_loader.exit:
+            break
 
         if args.dali:
             # reset DALI iterators
             train_loader.reset()
             if not args.noeval:
                 val_loader.reset()
-
-        dur_ep = time.time() - start_ep
-        print("EPOCH DURATION = {}".format(dur_ep))
-        time_stat.append(dur_ep)
 
     if args.local_rank == 0:
         for i in time_stat:
@@ -468,10 +532,17 @@ def main():
     dur_full = time.time() - start_full
     if args.local_rank == 0:
         print("Total time for all epochs = {}".format(dur_full))   
+    
+    filename = 'acc-' + str(args.gpu) + '.csv'
+    with open(filename, 'w+') as fw:
+        for i in range(0, len(time_list)):
+            fw.write("{},{}\n".format(time_list[i],acc_list[i]))
+    
 
     if args.dali:
         del pipe
-        del pipe_val 
+        if not args.noeval:
+            del pipe_val 
 
     return total_time.avg
 
@@ -503,7 +574,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
             target_var = Variable(target).cuda(args.gpu, non_blocking=True)
             train_loader_len =  int(len(train_loader))
 
-        adjust_learning_rate(optimizer, epoch, i, train_loader_len)
+        adjust_learning_rate(optimizer, epoch, i, train_loader_len, args.steps_so_far)
        
         #if i == 10:
         #    os.system("nvidia-smi")
@@ -552,7 +623,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         torch.cuda.synchronize()
         compute_time += (time.time() - compute_start)
-
+        
+        #args.steps_so_far += 1
         # measure elapsed time
         if i > 10:		
             batch_time.update(time.time() - end)
@@ -576,7 +648,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                    data_time=data_time, loss=losses, top1=top1, top5=top5))
     data_time_list.append(dataset_time)
     compute_time_list.append(compute_time)
-    return batch_time.avg
+    args.steps_so_far += (i + 1)
+    return batch_time.avg, (i+1) % train_loader_len
 
 
 def validate(val_loader, model, criterion):
@@ -649,10 +722,11 @@ def validate(val_loader, model, criterion):
     return [top1.avg, top5.avg]
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename='model.chk'):
+    print("Checkpointing at {}".format(filename))
     torch.save(state, filename)
-    if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+    #if is_best:
+    #    shutil.copyfile(filename, 'model_best.pth.tar')
 
 
 class AverageMeter(object):
@@ -673,8 +747,13 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def adjust_learning_rate(optimizer, epoch, step, len_epoch):
+def adjust_learning_rate(optimizer, epoch, step, len_epoch, steps_so_far):
     """LR schedule that should yield 76% converged accuracy with batch size 256"""
+    if args.step_lr:
+        # apply lr schedule based on steps completed
+        epoch = int(steps_so_far/len_epoch)
+        step = step + (steps_so_far % len_epoch)
+
     factor = epoch // 30
 
     if epoch >= 80:
@@ -687,7 +766,10 @@ def adjust_learning_rate(optimizer, epoch, step, len_epoch):
         lr = lr * float(1 + step + epoch * len_epoch) / (5. * len_epoch)
 
     if(args.local_rank == 0 and step % args.print_freq == 0 and step > 1):
-        print("Epoch = {}, step = {}, lr = {}".format(epoch, step, lr))
+        if not args.step_lr:
+            print("Epoch = {}, step = {}, lr = {}".format(epoch, step, lr))
+        else:
+            print("STEP LR : Epoch = {}, step = {}, lr = {}, steps_so_far={}".format(epoch, step, lr, steps_so_far))
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr

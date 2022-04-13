@@ -1,0 +1,137 @@
+## Synergy Simulation and Deployment
+
+### Defining the cluster config
+
+Create a config file in $ROOT/configs such as  configs/config_file.ini
+	-	Contains details of per-machine stats that will be used to track resources
+	- Entries could include:
+		- [CLUSTER]
+		- racks = 1
+		- servers_per_rack = 4
+		- gpus_per_server = 8
+		- cpus_per_server = 24
+		- dram_per_server = 500
+		- sspeed_per_server = 500
+
+	- Since we assume homogeneous servers, the GPU, CPU IDs to be used for deployment, memory allocation, and scheduling
+     decisions will be made based on these metrics.
+
+## Prereq
+```
+- cd deployment
+- ./upgrade_pip.sh
+- make
+- cd ..
+- pip install -r requirements.txt
+```
+
+### Simulation
+
+In Runner.py : 
+	- Uses philly trace with an exponential arrival distribution by default, as in most experiments in the paper
+	- Appropriately set the scheduler in the script
+ 
+    - Assumes default_cluster.ini file with 128 GPUs for simulation if no custom config file is specified. If you need a specific cluster config, specify it using --cluster_config option
+
+	- Single-GPU workload trace
+
+		python runner.py --cluster_job_log trace/cluster_job_log --plot  2>&1 | tee  out-deploy
+
+
+	- Multi-GPU workload trace
+
+		python runner.py --cluster_job_log trace/cluster_job_log --plot --multigpu  2>&1 | tee  out-deploy
+
+
+### Deployment
+
+- There's one central scheduler server that makes scheduling decisions and launches jobs on appropriate
+worker machines in each round
+- Each worker machine should run a server to interact with the scheduler and accept requests.
+
+
+In configs/machine_ip_port.txt:
+	- Enter in order (IP, port, start_gpu_id, start_cpu_id, needs_numa_aware_alloc) for each worker machine
+  - The # lines (entries)in the above file must be qual to the number of servers mentioned 
+      in configs/config_file.ini
+	- GPU devices for deployment will be enumerated from (start_gpu_id, gpus_per_server+start_gpu_id)
+	- CPU indices for deployment will be enumerated from (start_cpu_id, cpus_per_server+start_cpu_id) if not numa aware
+	- Else CPU indices will be retrieved from numactl stats and appropriately allocated
+
+
+In Runner.py : 
+
+	- Check round duration (set to 300)
+	- Uses default_workload in jobs/workload.py and LAS (las_synergy_new)
+	- Set job_total_iters and gpu_demands
+	- Static trace
+
+
+	- On the scheduler machine:
+		python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num_jobs_default 4 2>&1 | tee  out-deploy
+
+	- On each worker machine:
+
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+		
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16001 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+
+
+Deployment2
+
+python runner.py  --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num-jobs-default 8 2>&1 | tee out-deploy-synthetic
+
+
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+Record trace:
+python runner.py --cluster_job_log trace/cluster_job_log --plot  --static --small_static_trace --num-jobs-default 16 --record_trace --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee static-simulate-fifo-1server-allimage  
+
+
+Replay trace:
+python runner.py --plot --static --replay_trace record100.0_fair --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-simulate
+
+python runner.py --no_simulate --plot --static --replay_trace record100.0_fair --conn_file configs/machine_ip_port.txt  --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-2
+
+python launch_worker_server.py -i 127.0.0.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/ 2>&1 | tee out-server-allimg-replay-2
+
+Trace 1:
+
+- jobs/model_zoo.py - change list of available models
+
+-use_real_scores in model_zoo.py and model.py
+
+
+# CVXPY
+python runner.py --config_file  configs/deployment.ini --no_use_cache   --cluster_job_log trace/cluster_job_log --replay results-cvxpy/rounding-4server/GLPK_MI/4/record_91.log --plot 2>&1 | tee results-cvxpy/rounding-4server/GLPK_MI/4/tune_91.log
+
+  - <ilp1, ilp2, phase2, num_servers, multi_gpu>
+	-	Generates workload and records trace worth one round
+./run_cvxpy.sh 1 0 1 4 1 results-cvxpy/rounding-4server/
+
+	-	To replay a recorded trace:
+python cvxpy_test.py --ilp1 --solver2 GLPK_MI --trace opt_record.log --num_servers 4 2>&1 | tee opt_replay_multi_round-seed1-1.log    
+
+ 
+# Run first 10 jobs from trace
+ python runner.py --cluster_job_log trace/cluster_job_log --multigpu --no_exp --philly_arrival --num-jobs-default 10 2>&1 | tee analyze_trace.log
+ 
+# Analyze trace (orig_gpu, sum_attempts_orig_arrival, orig_duration)
+python runner.py --cluster_job_log trace/cluster_job_log --multigpu --analyze_trace 2>&1 | tee analyze_trace.log
+
+used 1500-1600 (5000 jobs)
+used 1000-1500
+
+# Set 1 philly
+Parse 8000 jobs starting at time 1000 till 1500
+Consider jct of jobs 3k-4k
+Random workload assignment
+
+# Set 2 philly
+Parse 8000 jobs starting at time 2400 till 3000
+jct of jobs 4k-5k
+Workload 35,60,5
+ 
+

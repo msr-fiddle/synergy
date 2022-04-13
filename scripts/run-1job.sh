@@ -8,23 +8,23 @@ fi
 DATA_DIR=$1
 OUT_DIR=$2
 WORKER=$3
-SRC="src/"
+SRC="models/image_classification/"
 SCRIPTS="scripts/"
 
 rm train
 rm val
-ln -s $DATA_DIR/train train
-ln -s $DATA_DIR/val val
+#ln -s $DATA_DIR/train train
+#ln -s $DATA_DIR/val val
 mkdir -p $OUT_DIR
 
 
 gpu=0
-num_gpu=1
+num_gpu=8
 
 echo " Data dir is $DATA_DIR"
 echo " Out dir is $OUT_DIR"
 
-#: <<'END'
+: <<'END'
 #for arch in 'alexnet' 'shufflenet_v2_x0_5' 'mobilenet_v2' 'squeezenet1_0' 'resnet50' 'vgg11'; do
 for arch in 'resnet18'; do
 	for workers in $WORKER; do
@@ -52,7 +52,6 @@ for arch in 'resnet18'; do
 		done
 	done
 done
-#END
 for arch in 'resnet18'; do
 	for workers in $WORKER; do
 		for batch in 512; do
@@ -64,7 +63,7 @@ for arch in 'resnet18'; do
 			./$SCRIPTS/free.sh &
 			./$SCRIPTS/gpulog.sh &
 			dstat -cdnmgyr --output all-utils.csv 2>&1 & 
-			CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch --nproc_per_node=$num_gpu $SRC/pytorch-imagenet.py -a $arch -b $batch --workers $workers --epochs 3 --amp ./ > stdout.out 2>&1
+			python -m torch.distributed.launch --nproc_per_node=$num_gpu $SRC/pytorch-imagenet.py -a $arch -b $batch --workers $workers --epochs 1 --amp --max-iterations 50 --noeval --data $DATA_DIR > stdout.out 2>&1
 			echo "RAN $arch for $workers workers, $batch batch with DDP" >> stdout.out
 			pkill -f mpstat
 			pkill -f dstat
@@ -80,7 +79,9 @@ for arch in 'resnet18'; do
 	done
 done
 
+exit
 #END
+END
 
 for arch in 'resnet18'; do
 	for workers in $WORKER; do
@@ -93,7 +94,8 @@ for arch in 'resnet18'; do
 			./$SCRIPTS/free.sh &
 			./$SCRIPTS/gpulog.sh &
 			dstat -cdnmgyr --output all-utils.csv 2>&1 & 
-			CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch --nproc_per_node=$num_gpu $SRC/pytorch-imagenet.py -a $arch -b $batch --workers $workers --epochs 3 --amp --dali --dali_cpu ./ > stdout.out 2>&1
+			python -m torch.distributed.launch --nproc_per_node=$num_gpu $SRC/pytorch-imagenet.py -a $arch -b $batch --workers $workers --epochs 8 --amp --dali --dali_cpu  --noeval --data $DATA_DIR > stdout.out 2>&1
+			#python -m torch.distributed.launch --nproc_per_node=$num_gpu $SRC/pytorch-imagenet.py -a $arch -b $batch --workers $workers --epochs 1 --amp --dali --dali_cpu  --max-iterations 50 --noeval --data $DATA_DIR > stdout.out 2>&1
 			echo "RAN $arch for $workers workers, $batch batch with DALI CPU" >> stdout.out
 			pkill -f mpstat
 			pkill -f dstat
@@ -105,6 +107,7 @@ for arch in 'resnet18'; do
 			mv *.out  $result_dir/
 			mv *.log $result_dir/
 			mv *.csv $result_dir/
+			cp chk/* $result_dir/
 		done
 	done
 done

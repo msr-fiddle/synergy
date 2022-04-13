@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+import "common.proto";
+import "google/protobuf/struct.proto";
+
+service SchedulerToWorker {
+    // Starts a job on worker.
+    rpc RunJob (RunJobRequest) returns (Empty) {}
+    // Ends a job on worker.
+    rpc KillJob (KillJobRequest) returns (Empty) {}
+    // Resets the worker.
+    rpc Reset (Empty) returns (Empty) {}
+    // Shuts down the worker.
+    rpc Shutdown (Empty) returns (Empty) {}
+}
+
+message JobDescription {
+    uint64 job_id = 1;
+    string command = 2;
+    string work_dir = 3;
+    google.protobuf.Struct env = 4;
+    //map<string, string> env = 4;
+}
+
+message RunJobRequest {
+    JobDescription job_description = 1;
+    uint64 round_num = 2;
+}
+
+message KillJobRequest {
+    uint64 job_id = 1;
+}

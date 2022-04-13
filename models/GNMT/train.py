@@ -45,6 +45,10 @@ from seq2seq.models.gnmt import GNMT
 from seq2seq.train.smoothing import LabelSmoothing
 from seq2seq.train.table import TrainingTable
 
+sys.path.append('./')
+sys.path.append('./src')
+from utils.utilities import Register
+from iterator.synergy_iterator import SynergyIterator
 
 def parse_args():
     """
@@ -152,7 +156,7 @@ def parse_args():
                          choices=['off', 'once', 'always'],
                          help='controls preallocation')
 
-    exclusive_group(group=general, name='eval', default=True,
+    exclusive_group(group=general, name='eval', default=False,
                     help='run validation and test after every epoch')
     exclusive_group(group=general, name='env', default=True,
                     help='print info about execution env')
@@ -170,7 +174,7 @@ def parse_args():
                          help='use at most TRAIN_MAX_SIZE elements from \
                          training dataset (useful for benchmarking), by \
                          default uses entire dataset')
-    training.add_argument('--train-batch-size', default=128, type=int,
+    training.add_argument('-b', '--train-batch-size', default=128, type=int,
                           help='training batch size per worker')
     training.add_argument('--train-global-batch-size', default=None, type=int,
                           help='global training batch size, this argument \
@@ -188,6 +192,9 @@ def parse_args():
     training.add_argument('--epochs', default=6, type=int,
                           help='max number of training epochs')
 
+    training.add_argument("--nnodes", default=1, type=int)
+    training.add_argument("--node_rank", default=0, type=int)
+
     training.add_argument('--grad-clip', default=5.0, type=float,
                           help='enables gradient clipping and sets maximum \
                           norm of gradients')
@@ -197,7 +204,7 @@ def parse_args():
     training.add_argument('--train-min-length', default=0, type=int,
                           help='minimum sequence length for training \
                           (including special BOS and EOS tokens)')
-    training.add_argument('--train-loader-workers', default=2, type=int,
+    training.add_argument('-j', '--workers', default=2, type=int,
                           help='number of workers for training data loading')
     training.add_argument('--batching', default='bucketing', type=str,
                           choices=['random', 'sharding', 'bucketing'],
@@ -208,6 +215,11 @@ def parse_args():
     training.add_argument('--num-buckets', default=5, type=int,
                           help='number of buckets for "bucketing" batching \
                           algorithm')
+    training.add_argument('--max-iterations', default=-1, type=int,
+                          help='Max iterations to run')
+    training.add_argument('--synergy', action='store_true')   
+    training.add_argument('--profile-phase', action='store_true')   
+    training.add_argument('--job-name', default="job-0", type=str)   
 
     # optimizer
     optimizer = parser.add_argument_group('optimizer setup')
@@ -370,6 +382,11 @@ def main():
     utils.init_distributed(args.cuda)
     args.rank = utils.get_rank()
 
+    if args.rank == 0:
+        register_handle = Register(name=args.job_name)
+    else:
+        register_handle = None 
+
     if not args.cudnn:
         torch.backends.cudnn.enabled = False
 
@@ -473,7 +490,11 @@ def main():
                                          shuffle=True,
                                          batching=args.batching,
                                          batching_opt=batching_opt,
-                                         num_workers=args.train_loader_workers)
+                                         num_workers=args.workers)
+
+    if args.synergy:
+        train_loader = SynergyIterator(train_loader, bs=args.train_batch_size)
+
 
     val_loader = val_data.get_loader(batch_size=args.val_batch_size,
                                      batch_first=batch_first,
@@ -527,6 +548,8 @@ def main():
         intra_epoch_eval=args.intra_epoch_eval,
         translator=translator,
         prealloc_mode=args.prealloc_mode,
+        max_iterations=args.max_iterations,
+        register_handle=register_handle,
         )
 
     trainer = trainers.Seq2SeqTrainer(**trainer_options)

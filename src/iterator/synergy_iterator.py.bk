@@ -1,0 +1,121 @@
+''' Dataloader iterator for synergy
+	A wrapper around the PyTorch based iterators to monitor
+	  iteration count, duration, checkpoints and leases
+	  automatically. 
+	* On startup, if the checkpoint directory is non empty,
+	  calls the user-provided Resume code to initiatilze
+	  training state. Additionally, uses the dataloader
+	  state info in the checkpoint to initialize
+	  iterator.
+	* Monitors remaining lease duration, and appropriately
+	  checks lease status before the current one expires.
+	* If the lease expires and the job has to be preempted 
+	  from the current server, then the iterator
+	  1. calls the checkpoint code to snapshot the current
+	     training state (user given checkpoint code), along
+	     with the dataloader state
+	  2. sends a RPC call to the central scheduler with the
+	     job performance stats ( per-iter duration, 
+	     tput -- samples/s, and notifies that the job can now
+	     be safely pre-empted.
+
+So far : Monitor iters, epochs and cause training to exit 
+every 'steps_to_run' steps if specified (equivalent to round
+durations). Currently supports dali iterator.
+Resume and chk code is in train script. Must clean it up
+to dataloader state chk and resume a part of this iterator.
+
+'''
+
+import torch
+import time
+from collections.abc import Iterable
+import math
+
+# DALI dataloader imports
+try:
+	from nvidia.dali.plugin.pytorch import DALIClassificationIterator
+except:
+	raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")  
+
+#Pytorch native dataloader import
+from torch.utils.data.dataloader import DataLoader
+
+
+class SynergyIterator:
+	def __init__(self, dataloader, bs=128, dali=True, 
+			steps_this_epoch=0, epoch=0, worker_id=0,
+			chk=None, chk_freq=0, steps_to_run=-1):
+		if not isinstance(dataloader, Iterable):
+			raise ValueError("Dataloader of type {} is not iterable".format(type(dataloader)))
+
+		self._dataloader = dataloader
+		print("Using Synergy Iterator")
+		self._steps_this_epoch = steps_this_epoch
+		self._samples_this_epoch = 0
+		self._epoch = epoch
+		self._chk_freq = chk_freq
+		self._batch_size = bs
+		self._dali = dali
+		self._steps_to_run = steps_to_run
+		self._max_steps_per_epoch = int(math.ceil(self._size / self._batch_size))
+		self._total_steps =  self._epoch*self._max_steps_per_epoch + self._steps_this_epoch
+		self._worker_id = worker_id
+		self._steps_this_run = 0
+		self._exit = False
+		print("Epoch={}, this ep steps={}, max_steps={}, total_steps={}, steps_to_run = {}".format(self._epoch,
+			self._steps_this_epoch, self._max_steps_per_epoch, self._total_steps, self._steps_to_run))
+
+		
+
+	def __iter__(self):
+		self._iterator = iter(self._dataloader)
+		return self
+
+	def __next__(self):
+		if self._chk_freq > 0 and self._total_steps % self._chk_freq == 0:
+			print("MUST CHECKPOINT NOW AT ITER {}".format(self._steps_this_epoch))
+			raise StopIteration
+
+		# If we reached the max specified steps, return
+		if self._steps_to_run >= 0:
+			if self._steps_this_run == self._steps_to_run:
+				print("MUST CHECKPOINT NOW AT ITER {}:{}:{}".format(self._epoch, self._steps_this_epoch, self._samples_this_epoch))
+				self._exit = True
+				print("Epoch={}, this ep steps={}, total_steps={}, steps_this_run = {}".format(self._epoch, self._steps_this_epoch, self._total_steps, self._steps_this_run))
+
+				
+				raise StopIteration
+
+		#Else get next batch from iterator
+		try:
+			val = next(self._dataloader)
+		except StopIteration:
+			print("Tracking epoch end in Synergy DL. Steps this run = {}, this epoch={}, samples this epoch={}".format(self._steps_this_run, self._steps_this_epoch, self._samples_this_epoch))
+			self._epoch += 1
+			self._steps_this_epoch = 0     
+			self._samples_this_epoch = 0     
+			print("Epoch set to {}".format(self._epoch))
+			raise StopIteration
+
+		self._total_steps += 1
+		self._steps_this_epoch += 1
+		self._samples_this_epoch += self._batch_size
+		self._steps_this_run += 1
+
+		return val
+
+
+	def reset(self):
+		return self._dataloader.reset()
+
+
+	@property
+	def exit(self):
+		return self._exit	
+
+	@property
+	def _size(self):
+		return self._dataloader._size
+		
+

@@ -93,7 +93,7 @@ def parse_args():
 
 
 	# Profiler specific
-	parser.add_argument('--profiler-src', default="/mnt2/jaya/store-aware-packing/src/", type=str,
+	parser.add_argument('--profiler-src', default="/mnt2/jaya/synergy-private/src/", type=str,
 		help='Path to the profiler src')
 	parser.add_argument('--container-mnt', default="/datadrive/", type=str,
 		help='Mountpoint in the cointainer where src code is present')
@@ -137,14 +137,24 @@ def withinTenPercent(orig, current):
 	return False 
 
 def get_data_path(arg_list):
+  # strip leading /datadrive if present
 	if '--data' not in arg_list:
-		return arg_list[-1]
+		res = arg_list[-1]
 	else:
 		i = arg_list.index('--data')
-		return arg_list[i+1]
+		res = arg_list[i+1]
+	return res.replace('/datadrive', '')
 
 
 def get_dataset_stats(dir_path):
+	if "wmt" in dir_path:
+		return (8, 3498161)
+
+	if 'wikitext' in dir_path:
+        	return (1.3, 537728)
+        	#return (1.3, 806461)
+
+
 	print("Dir path = {}".format(dir_path))
 	train_path = dir_path + "/train/"
 	cmd = "du -sh " + train_path
@@ -168,6 +178,7 @@ def get_dataset_stats(dir_path):
 
 
 def launch_job(job_name, container, cpu, memory, script, script_args, out_dir):
+	print("Job name = {}".format(job_name))
 	monitor = Monitor(name = job_name)
 	cmd = "nvidia-docker run " + \
 				" --ipc={}".format("host") + \
@@ -225,6 +236,7 @@ def profile_cpu(num_cpus=0):
 	print(num_cpus)
 	 
 	cpu_profile_points = OrderedDict()
+	iter_times = OrderedDict()
 	
 	# TODO : Get dataset stats 
 	num_samples = args.num_samples
@@ -232,12 +244,19 @@ def profile_cpu(num_cpus=0):
 	num_iters = int(num_samples/args.num_gpus/args.batch_size)
 	res = -1
 	cpu_to_profile = num_cpus
+	#cpus_to_profile = [24,12]
+	#cpus_to_profile = [24,12, 9, 6, 5, 4, 3, 2, 1]
+	point = 0
 	while True:
+		#cpu_to_profile = cpus_to_profile[point]
 		start = time.time()
 		job_name = args.job_name + "_cpu_" + str(cpu_to_profile)
 		cur_res = launch_job(job_name, args.docker_img, cpu_to_profile, 500, args.training_script, args.training_script_args, "./") 
 		#cur_res = launch_job_dummy_oi(cpu_to_profile)
+		iter_times[cpu_to_profile] = cur_res
 		cur_res = cur_res * num_iters
+		if point == 0:
+			res = cur_res
 		print("Epoch time = {}, num_iters={}".format(cur_res, num_iters))
 		cpu_profile_points[cpu_to_profile] = cur_res
 		#break
@@ -247,13 +266,20 @@ def profile_cpu(num_cpus=0):
 		else:
 			cpu_to_profile = cpu_to_profile - args.num_gpus
 			res = cur_res
-		
+		point += 1	
 		dur = time.time() - start
+
+		#warm up : repeat the 1st profile
+		if point == 1:
+			cpu_to_profile = num_cpus
+
 		print("Time to explore {} = {}s".format(job_name, dur))
 		if cpu_to_profile < 1:
 			break
+	#	if point >= len(cpus_to_profile):
+	#		break
 
-	return cpu_profile_points
+	return cpu_profile_points, iter_times
 
 
 def get_bandwidths(disk=args.local_disk, cpu=1):
@@ -355,12 +381,19 @@ def estimate_speed(cpu, mem, max_time):
 	#print("{}:{}:{}:{}GB:{}GBcache".format(cpu, mem, time_to_disk, disk_fetch_size, cache_size))
 	total_time = time_to_cache + time_to_disk
 	avg_sample_size = dataset_size*1024*1024 / total_samples
+  # samples/s
 	effective_store_thr = dataset_size*1024*1024/total_time/avg_sample_size
 
+  # bottleneck is storage. Full bw required
 	if total_time > max_time:
-		return total_time
+		return total_time, disk_bw
 	else:
-		return max_time
+    #bottleneck is Compute
+    # compute storage speed to fetch in max_time
+    # cache fetch time remains the same
+		available_fetch_time = max_time - time_to_cache
+		speed_required = disk_fetch_size*1024/available_fetch_time
+		return max_time, speed_required
 	
 
 def main():
@@ -382,9 +415,10 @@ def main():
 	args.dataset_size, args.num_samples = get_dataset_stats(data_path)
 	print("Path = {}, Size = {}, Num samples = {}".format(data_path, args.dataset_size, args.num_samples))
 
-	perf_matrix =  PerfMatrix(path=args.profile_path)
+	perf_matrix =  PerfMatrix()
+	storage_matrix =  PerfMatrix()
 	
-	cpu_profile = profile_cpu(num_cpus=args.cpu)
+	cpu_profile, iter_times = profile_cpu(num_cpus=args.cpu)
 
 	print(cpu_profile)
 
@@ -408,17 +442,30 @@ def main():
 
 	for key, val in cpu_profile.items():
 		perf_matrix.put(key, 100, val)
+		storage_matrix.put(key, 100, 0)		
 
 	#for cpu  in [24]:
 	for cpu  in cpu_profile_points:
 		for mem in mem_profile_points:
 			if mem == 100:
 				continue
-			time = estimate_speed(cpu, mem, perf_matrix.get(cpu, 100))
+			time, disk_speed = estimate_speed(cpu, mem, perf_matrix.get(cpu, 100))
 			#print("Time for {}:{}% = {}".format(cpu, mem,time))
 			perf_matrix.put(cpu, mem, time)		
+			storage_matrix.put(cpu, mem, disk_speed)		
 
+	print(iter_times)
 	perf_matrix.show()
+	storage_matrix.show()
+
+	output = []
+	output.append(iter_times)
+	output.append(perf_matrix.perf_dict)
+	output.append(storage_matrix.perf_dict)
+	#if not os.path.exists(args.profile_path):
+	with open(args.profile_path, 'w') as f:
+		json.dump(output,f)
+ 
 
 if __name__ == "__main__":
 	main()

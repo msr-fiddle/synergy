@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+import "common.proto";
+
+service JobToScheduler {
+    rpc RegisterJob (RegisterJobRequest) returns (RegisterJobResponse);
+    rpc UpdateIters (UpdateItersRequest) returns (UpdateItersResponse);
+    rpc RoundEnd (RoundEndRequest) returns (RoundEndResponse);
+    rpc LeaseEnded (LeaseEndedRequest) returns (Empty);
+}
+
+message RegisterJobRequest {
+    uint64 job_id = 1;
+}
+
+message RegisterJobResponse {
+    uint64 time_elapsed_this_round_s = 1;
+    uint64 round_duration_s = 2;
+}
+
+message UpdateItersRequest {
+    uint64 job_id = 1;
+    uint64 num_steps = 2;
+    double execution_time_s = 3;
+    bool extend_lease = 4;
+    uint64 round_num = 5;
+}
+
+message UpdateItersResponse {
+    uint64 num_steps_per_round = 1;
+}
+
+message RoundEndRequest {
+    uint64 job_id = 1;
+    uint64 num_steps = 2;
+    double execution_time_s = 3;
+    bool done = 4;
+}
+
+message RoundEndResponse {
+    bool terminate_lease = 1;
+}
+
+message LeaseEndedRequest {
+    uint64 job_id = 1;
+    uint64 num_steps = 2;
+    double execution_time_s = 3;
+    uint64 round_num = 4;
+}
+

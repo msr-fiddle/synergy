@@ -21,9 +21,9 @@ import numpy as np
 import sacremoses
 import torch
 
-import utils
-from utils.vocabulary import OpenAIVocab
-from utils.vocabulary import Vocab
+import utils_tx
+from utils_tx.vocabulary import OpenAIVocab
+from utils_tx.vocabulary import Vocab
 
 
 class LMOrderedIterator(object):
@@ -56,13 +56,17 @@ class LMOrderedIterator(object):
             self.data = torch.cat((warmup_data, self.data))
 
         # Partition data for DistributedDataParallel
-        world_size = utils.distributed.get_world_size()
-        rank = utils.distributed.get_rank()
+        world_size = utils_tx.distributed.get_world_size()
+        rank = utils_tx.distributed.get_rank()
         self.data = self.data.chunk(world_size, dim=1)[rank]
 
         # Number of mini-batches
         self.n_batch = (self.data.size(0) + self.bptt - 1) // self.bptt
+        print("Datasize={}, bptt={}".format(self.data.size(0), self.bptt))  
 
+    def __len__(self):
+        return self.n_batch
+ 
     def roll(self):
         for i in range(self.data.size(1)):
             row = self.data[:, i]
@@ -318,7 +322,7 @@ def get_lm_corpus(datadir, dataset, vocab):
             pass
 
         corpus = Corpus(datadir, dataset, vocab, **kwargs)
-        with utils.distributed.sync_workers() as rank:
+        with utils_tx.distributed.sync_workers() as rank:
             if rank == 0:
                 torch.save(corpus, fn)
 

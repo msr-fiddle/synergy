@@ -103,3 +103,8 @@ class PerfMatrix:
 				sys.stdout.write("{:.0f}\t".format(val))    
 				#print("{} : {}GB = {}".format(cpu, mem, val))
 			sys.stdout.write("\n")
+
+	def write(self):
+		if not os.path.exists(self.file):
+			with open(self.file, 'w') as fp:
+				json.dump(self.perf_dict, fp)

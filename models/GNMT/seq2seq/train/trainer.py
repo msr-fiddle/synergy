@@ -62,7 +62,9 @@ class Seq2SeqTrainer:
                  prealloc_mode='always',
                  iter_size=1,
                  translator=None,
-                 verbose=False):
+                 verbose=False,
+                 max_iterations=-1,
+                 register_handle=None):
         """
         Constructor for the Seq2SeqTrainer.
 
@@ -112,6 +114,9 @@ class Seq2SeqTrainer:
 
         self.distributed = torch.distributed.is_initialized()
         self.batch_first = model.batch_first
+
+        self.max_iterations = max_iterations
+        self.register_handle = register_handle
 
         params = self.model.parameters()
 
@@ -239,7 +244,12 @@ class Seq2SeqTrainer:
 
             # measure elapsed time
             elapsed = time.time() - end
-            batch_time.update(elapsed)
+            if i > 10:
+                batch_time.update(elapsed)
+
+            if self.max_iterations > 0 and i > self.max_iterations:
+                break
+
             src_tok_time.update(num_toks['src'] / elapsed)
             tgt_tok_time.update(num_toks['tgt'] / elapsed)
             tot_num_toks = num_toks['tgt'] + num_toks['src']
@@ -267,8 +277,11 @@ class Seq2SeqTrainer:
                 self.preallocate(data_loader.batch_size,
                                  data_loader.dataset.max_len, training=True)
 
-            if i % self.print_freq == 0:
+            if i % self.print_freq == 0 and i > 10:
                 phase = 'TRAIN' if training else 'VALIDATION'
+
+                if training and self.register_handle is not None:
+                     self.register_handle.log_update(batch_time.avg, i, self.epoch)
                 log = []
                 log += [f'{phase} [{self.epoch}][{i}/{len(data_loader)}]']
                 log += [f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})']

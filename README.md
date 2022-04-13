@@ -1,62 +1,111 @@
-## Synergy : Workload- and Data-Aware Scheduling for Multi-Tenant GPU Clusters
-GPU cluster schedulers for DNN jobs decide how to allocate diverse resources to many users while implementing
-complex cluster-wide scheduling policies to optimize for objectives such as average job completion
-times (JCT), makespan, or user-level fairness. All prior work on DNN scheduling assume GPU to be the dominant
-resource in the scheduling task; i.e., a user requests a fixed number of GPUs for her DNN job, and
-when the requested number of GPUs are all available at once (gang scheduling), the job is scheduled
-to run. However, the GPU cluster schedulers as of today ignore two important characteristics of DNN
-jobs that results in inefficient job placements and reresource allocation.
-  * **Resource sensitivity**. GPU cluster schedulers do not consider the sensitivity of a DNN job to
-the CPU, DRAM, and storage resources (data stall) allocated to the job. These resources are
-simply fair-shared proportional to the number of GPUs allocated to the job.
-  * **Data sensitivity**. Prior work on GPU cluster scheduling ignore the impact of dataset locality;
-they assume that the dataset required by the job is present locally before the training begins
-and are small enough to fit in DRAM.
+## Synergy :  Looking Beyond GPUs for DNN Scheduling on Multi-Tenant Clusters
 
-This work introduces a new DNN scheduler, **Synergy**, which shows that DNN jobs exhibit varied levels of sensitivity to the amount of CPU,
-DRAM, and storage allocated to the job; the scheduler must be cognizant of the job resource requirements 
-(beyond just the GPU), and allocate storage resources proportional to the workload requirements
-rather than a fair-share. Furthermore, input datasets are typically stored on remote stores like Azure
-blobs which has to be imported locally when a job is scheduled to run on a server. We show that
-schedulers must be mindful of data locality when performing job migrations either due to re-packing
-to fit newly arriving jobs, or a better performing schedule is identified.
+This repository contains the source code implementation of the OSDI paper "Looking Beyond GPUs for DNN Scheduling on Multi-Tenant Clusters".
+
+### Directory Structure
 
 
-[[PPT]](https://drive.google.com/file/d/1bBibeGadySMbhZZRZOec2CEbiMsBwKaL/view?usp=sharing)
-[[Experiment Sheet]](https://drive.google.com/file/d/15gPVzWU4ThVi1isqtDIGsw7RHNm_8AiE/view?usp=sharing)
+### Defining the cluster config
 
-## Using the profiler
+Create a config file in $ROOT/configs such as  configs/config_file.ini
+	-	Contains details of per-machine stats that will be used to track resources
+	- Entries could include:
+		- [CLUSTER]
+		- racks = 1
+		- servers_per_rack = 4
+		- gpus_per_server = 8
+		- cpus_per_server = 24
+		- dram_per_server = 500
+		- sspeed_per_server = 500
 
-python offline_profiler.py <list of profiler options>  <training script>  <additional training script specific args>
-  
-  1.  If an argument is repeated in both profiler options and train script options, profiler option is chosen
-  2.  Profiler_options
-      * --docker-img  : docker container image name (full path so that it can be downloaded if not present locally 
-      * --container-mnt: mountpoint in the container where dataset will be mounted. Default : /datadrive
-      * --num-gpus    : number of GPUs used in training
-      * --nnodes      : number of nodes used in training
-      * --master_addr : IP of master node (same as torch.distr.launch)
-      * --master_port : Free port on master (same as torch.distr.launch)
-      * --cpu         : Max # CPUs to use. If not specified, uses all available CPUs on the server
-      * --memory      : Max memory (GB) to be used in profiling. If not specified, uses max DRAM on system
-      * -b            : Per-GPU batch size
-      * --max-iterations: Max iterations per profiling run
-      
-  3. The following options are expected to be supported by the job script. 
-      * --batch, -b   : Batch size per GPU
-      * --workers, -j : Number of CPU data workers
-      * --max_iterations: Return training after these # of iterations
-      * --data        : Path to dataset
+	- Since we assume homogeneous servers, the GPU, CPU IDs to be used for deployment, memory allocation, and scheduling
+     decisions will be made based on these metrics.
 
-List of all other supported options can be found using the following command
+## Prereq
 ```
-python offline_profiler.py -h
+- cd deployment
+- ./upgrade_pip.sh
+- make
+- cd ..
+- pip install -r requirements.txt
 ```
 
-### Example
+### Simulation
 
-```
- -  cd store-aware-packing/src
- -  cd profiler; ./prereq.sh; cd ..
- -  python profiler/offline_profiler.py --job-name job-res18 --cpu 24 --num-gpus 4 -b 512 --docker-img=nvidia/dali:py36_cu10.run ../models/image_classification/pytorch-imagenet.py --dali --amp --dali_cpu --max-iterations 50 --workers 3 -b 512 --data '/datadrive/mnt4/jaya/datasets/imagenet/' | tee res18out.log
-```
+In Runner.py : 
+	- Uses philly trace with an exponential arrival distribution by default, as in most experiments in the paper
+	- Appropriately set the scheduler in the script
+ 
+    - Assumes default_cluster.ini file with 128 GPUs for simulation if no custom config file is specified. If you need a specific cluster config, specify it using --cluster_config option
+
+	- Single-GPU workload trace
+
+		python runner.py --cluster_job_log trace/cluster_job_log --plot  2>&1 | tee  out-deploy
+
+
+	- Multi-GPU workload trace
+
+		python runner.py --cluster_job_log trace/cluster_job_log --plot --multigpu  2>&1 | tee  out-deploy
+
+
+### Deployment
+
+- There's one central scheduler server that makes scheduling decisions and launches jobs on appropriate
+worker machines in each round
+- Each worker machine should run a server to interact with the scheduler and accept requests.
+
+
+In configs/machine_ip_port.txt:
+	- Enter in order (IP, port, start_gpu_id, start_cpu_id, needs_numa_aware_alloc) for each worker machine
+  - The # lines (entries)in the above file must be qual to the number of servers mentioned 
+      in configs/config_file.ini
+	- GPU devices for deployment will be enumerated from (start_gpu_id, gpus_per_server+start_gpu_id)
+	- CPU indices for deployment will be enumerated from (start_cpu_id, cpus_per_server+start_cpu_id) if not numa aware
+	- Else CPU indices will be retrieved from numactl stats and appropriately allocated
+
+
+In Runner.py : 
+
+	- Check round duration (set to 300)
+	- Uses default_workload in jobs/workload.py and LAS (las_synergy_new)
+	- Set job_total_iters and gpu_demands
+	- Static trace
+
+
+	- On the scheduler machine:
+		python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num_jobs_default 4 2>&1 | tee  out-deploy
+
+	- On each worker machine:
+
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+		
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16001 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+
+
+Deployment2
+
+python runner.py  --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num-jobs-default 8 2>&1 | tee out-deploy-synthetic
+
+
+		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
+
+
+Record and replay trace for deployment:
+
+Record trace:
+python runner.py --cluster_job_log trace/cluster_job_log --plot  --static --small_static_trace --num-jobs-default 100 --record_trace --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee static-simulate-fifo-1server-allimage  
+
+
+Replay trace:
+In simulation : python runner.py --plot --static --replay_trace record100.0_fair --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-simulate
+
+In deployment : python runner.py --no_simulate --plot --static --replay_trace record100.0_fair --conn_file configs/machine_ip_port.txt  --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-2
+
+python launch_worker_server.py -i 127.0.0.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/ 2>&1 | tee out-server-allimg-replay-2
+
+
+
+ 
+
