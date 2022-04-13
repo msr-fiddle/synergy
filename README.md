@@ -4,24 +4,22 @@ This repository contains the source code implementation of the OSDI paper "Looki
 
 ### Directory Structure
 
+#### simulator
+This contains code for the Synergy scheduler, that includes various scheduling policies (scheduler/), in a simulator harness (runner.py), and a deployment module using gRPC(deployment/).
 
-### Defining the cluster config
+#### src
+This contains the src code for offline profiling alongside a detailed [README](README-offline_profiling.md) that discusses how to use it.
 
-Create a config file in $ROOT/configs such as  configs/config_file.ini
-	-	Contains details of per-machine stats that will be used to track resources
-	- Entries could include:
-		- [CLUSTER]
-		- racks = 1
-		- servers_per_rack = 4
-		- gpus_per_server = 8
-		- cpus_per_server = 24
-		- dram_per_server = 500
-		- sspeed_per_server = 500
+### Setup
+Please install the following dependencies before proceeding.
 
-	- Since we assume homogeneous servers, the GPU, CPU IDs to be used for deployment, memory allocation, and scheduling
-     decisions will be made based on these metrics.
+#### Setup profiler
+```
+- cd src
+- cd profiler; ./prereq.sh; cd ..
+```
 
-## Prereq
+#### Setup simulator
 ```
 - cd deployment
 - ./upgrade_pip.sh
@@ -30,82 +28,38 @@ Create a config file in $ROOT/configs such as  configs/config_file.ini
 - pip install -r requirements.txt
 ```
 
-### Simulation
-
-In Runner.py : 
-	- Uses philly trace with an exponential arrival distribution by default, as in most experiments in the paper
-	- Appropriately set the scheduler in the script
- 
-    - Assumes default_cluster.ini file with 128 GPUs for simulation if no custom config file is specified. If you need a specific cluster config, specify it using --cluster_config option
-
-	- Single-GPU workload trace
-
-		python runner.py --cluster_job_log trace/cluster_job_log --plot  2>&1 | tee  out-deploy
+#### Setup iterator
+Synergy uses its own PyTorch iterator that is built on top of DALI & CoorDL. So before you run any profiling experiment, or deployment in a real GPU cluster,  build a docker container with this iterator support by following these steps. Note that this is not required to run the simulation experiments.
+```
+- git clone https://github.com/jayashreemohan29/Synergy-CoorDL.git
+- git checkout iterator_chk
+- cd docker
+- CREATE_RUNNER="YES" ./build.sh
+```
+ This will create a docker container tagged nvidia/dali:py36_cu10.run
 
 
-	- Multi-GPU workload trace
+### Getting Started
+The simplest way to get started with Synergy, is to test it out in a simulated cluster (can be run on a local machine without GPUs, or any specific hardware requirement). The test harness is the [runner.py](simulator/runner.py) file. For instance, to evaluate a FIFO scheduling policy using the default GPU-proportional allocation and synergy's tune based allocation, run the following command:
 
-		python runner.py --cluster_job_log trace/cluster_job_log --plot --multigpu  2>&1 | tee  out-deploy
+```
+python runner.py --cluster_job_log trace/cluster_job_log --plot  2>&1 | tee  out-deploy
+```
 
+Other options supported by the test harness are:
 
-### Deployment
-
-- There's one central scheduler server that makes scheduling decisions and launches jobs on appropriate
-worker machines in each round
-- Each worker machine should run a server to interact with the scheduler and accept requests.
-
-
-In configs/machine_ip_port.txt:
-	- Enter in order (IP, port, start_gpu_id, start_cpu_id, needs_numa_aware_alloc) for each worker machine
-  - The # lines (entries)in the above file must be qual to the number of servers mentioned 
-      in configs/config_file.ini
-	- GPU devices for deployment will be enumerated from (start_gpu_id, gpus_per_server+start_gpu_id)
-	- CPU indices for deployment will be enumerated from (start_cpu_id, cpus_per_server+start_cpu_id) if not numa aware
-	- Else CPU indices will be retrieved from numactl stats and appropriately allocated
-
-
-In Runner.py : 
-
-	- Check round duration (set to 300)
-	- Uses default_workload in jobs/workload.py and LAS (las_synergy_new)
-	- Set job_total_iters and gpu_demands
-	- Static trace
+* --cluster_job_log : The Philly trace
+* --plot : Plot the CDF and JCT of runs
+* --multigpu : Allow multi-GPU jobs in the mix
+* --no_exp :  Disable the exponential arrival distribution
+* --philly_arrival : Use arrival information as is from the Philly trace (must also use --no_exp)
+* --rec_trace : Record the generated trace
+* --replay_trace : Replay a previously recorded trace
+* --config_file : Cluster configuration, default of 128GPUs in configs/default_cluster.ini
+* --no_simulate : Run it on a real GPU cluster
+* schedulers : List of schedulers to run, for eg., ['FIFO+fair' , 'FIFO+tune']
+* jobs_per_hour : List of different arrival rates, for eg., np.arange(1.0, 10, 1)
+* class split : Split of <vision. language, speech> models, for eg., class_split=[(20,70,10)]
 
 
-	- On the scheduler machine:
-		python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num_jobs_default 4 2>&1 | tee  out-deploy
-
-	- On each worker machine:
-
-		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
-
-		
-		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16001 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
-
-
-
-Deployment2
-
-python runner.py  --config_file configs/test_deployment.ini --conn_file configs/machine_ip_port.txt  --no_use_cache --no_simulate --num-jobs-default 8 2>&1 | tee out-deploy-synthetic
-
-
-		python launch_worker_server.py -i 127.0.1.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/
-
-
-Record and replay trace for deployment:
-
-Record trace:
-python runner.py --cluster_job_log trace/cluster_job_log --plot  --static --small_static_trace --num-jobs-default 100 --record_trace --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee static-simulate-fifo-1server-allimage  
-
-
-Replay trace:
-In simulation : python runner.py --plot --static --replay_trace record100.0_fair --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-simulate
-
-In deployment : python runner.py --no_simulate --plot --static --replay_trace record100.0_fair --conn_file configs/machine_ip_port.txt  --no_use_cache --config_file configs/test_deployment.ini  2>&1 | tee  static-simulate-fifo-1server-allimage-replay-2
-
-python launch_worker_server.py -i 127.0.0.1 -s 14000 -w 16000 -g 8 --run_dir ./ --data_dir ./ --checkpoint_dir ./chk/ 2>&1 | tee out-server-allimg-replay-2
-
-
-
- 
-
+Other detailed run instructions are in [README](simulator/README.md) and [README](README-offline_profiling.md)
