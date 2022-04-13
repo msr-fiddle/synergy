@@ -8,7 +8,7 @@ This repository contains the source code implementation of the OSDI paper "Looki
 This contains code for the Synergy scheduler, that includes various scheduling policies (scheduler/), in a simulator harness (runner.py), and a deployment module using gRPC(deployment/).
 
 #### src
-This contains the src code for offline profiling alongside a detailed [README](README-offline_profiling.md) that discusses how to use it.
+This contains the src code for offline profiling alongside a detailed [README](README-offline-profiler.md) that discusses how to use it.
 
 ### Setup
 Please install the following dependencies before proceeding.
@@ -62,4 +62,4 @@ Other options supported by the test harness are:
 * class split : Split of <vision. language, speech> models, for eg., class_split=[(20,70,10)]
 
 
-Other detailed run instructions are in [README](simulator/README.md) and [README](README-offline_profiling.md)
+Other detailed run instructions are in [README](simulator/README.md) and [README](README-offline-profiler.md)
