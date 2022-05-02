@@ -28,6 +28,8 @@ the paper, and these profiles can be found in `simulator/models/`. Execute all t
 
 To run various combinatons of [schedulers](simulator/runner.py#L393), [class_split](simulator/runner.py#L408), and load [jobs_per_hours](simulator/runner.py#L405), please refer to these respective lines in `runner.py`.
 
+The permissible values for schedulers are 'LAS', 'SRTF', 'FIFO', 'FTF' - these options run the Synergy-Greedy version. To enable fair version, use 'scheduler+fair', and for Synergy-Tune, use 'scheduler+tune'. For example, 'LAS+fair', 'LAS+tune'.
+
 ### Testing the functionality
 
 The quickest way to check if the simulator functions correctly is to execute the runner script with default setting 
@@ -78,10 +80,10 @@ For Fig 9, uncomment the list of splits [here](simulator/runner.py#L409) and exe
 To vary CPU:GPU config, use the appropriate config file as input to the runner, and rename the model directory appropriately. For instance, to 
 test a CPU:GPU ratio of 4, 
 
-`` 
+```
 mv models models-3
 mv models-4 models
 python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file configs/cluster_4.ini  2>&1 | tee  out.log
-``
+```
 
 For Fig 12, please set schedulers to [this](simulator/runner.py#L400).
