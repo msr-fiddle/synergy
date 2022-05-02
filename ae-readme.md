@@ -87,3 +87,11 @@ python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file co
 ```
 
 For Fig 12, please set schedulers to [this](simulator/runner.py#L400).
+
+### Deployment traces
+
+To run the deployment experiments, both the statc and dynamic traces used in the paper are available under `deploy_traces`. Following deployment instructons [here](simulator/README.md#deployment), run the scheduler with 
+```
+'--replay_trace deploy_trace/static_100job_6_3_1100.0 --static' for static trace
+'--replay_trace deploy_trace/dynamic/srtf.log' for dynamic trace
+```
