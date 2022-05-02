@@ -26,7 +26,7 @@ This can be run on a local machine with no GPUs. We have profiled the throughput
 the paper, and these profiles can be found in `simulator/models/`. Execute all the following simulation runs from the `simulator` sub-directory using the file 
 `runner.py`. By default, the cluster configuration is 128 V100 GPUs (16 * 8-GPU machines, each with 500GB DRAM, and 24 CPU cores).
 
-To run various combinatons of [schedulers](), [class_split](), and load [jobs_per_hours](), please refer to these respective lines in `runner.py`.
+To run various combinatons of [schedulers](runner.py#L393), [class_split](runner.py#L408), and load [jobs_per_hours](runner.py#L405), please refer to these respective lines in `runner.py`.
 
 ### Testing the functionality
 
@@ -49,7 +49,7 @@ After each run, the directry `plots`contains the corresponding plots of `avg JCT
 the evaluation in the paper. The `cache` directory contains the results from the run for each configuration, should you rerun the experiment to plot different combinations of schedulers, stats from previously cached runs will be used. Use `--no_use_cache`if you want to force rerun the config, and `--no_cache_result' to disable caching. 
 
 ### Fig 1 (Average JCT with Synergy)
-To reproduce the intro result (Fig 1), uncomment the appropriate [scheduler]() and [load]() arguments in `runner.py` and execute the runner in the same way as above. The resultant graph is in `plots/avg_jct_vs_load.png`
+To reproduce the intro result (Fig 1), uncomment the appropriate [scheduler](runner.py#L397) and [load](runner.py#L406) arguments in `runner.py` and execute the runner in the same way as above. The resultant graph is in `plots/avg_jct_vs_load.png`
 
 ### Philly trace evaluation
 By default, the simulation uses a philly-derived trace as explained in the paper. To evaluate a larger cluster with the arrival times and gpu load as in the
@@ -61,7 +61,7 @@ python runner.py --cluster_job_log  trace/cluster_job_log --plot --philly_arriva
 
 
 ### Philly-derived trace evaluation
-To reproduce Fig 7 and 8, execute the runner as usual, with (--multigpu for Fig 7), by setting appropriate values for [scheduler]() and [load]()
+To reproduce Fig 7 and 8, execute the runner as usual, with (--multigpu for Fig 7), by setting appropriate values for scheduler and load.
 
 For single-GPU jobs (Fig 8), 
 ```
@@ -73,7 +73,7 @@ For multi-GPU jobs (Fig 7),
 python runner.py --cluster_job_log trace/cluster_job_log --plot --multigpu 2>&1 | tee  out.log
 ```
 
-For Fig 9, uncomment the list of splits [here]() and execute the runner as usual.
+For Fig 9, uncomment the list of splits [here](runner.py#L409) and execute the runner as usual.
 
 To vary CPU:GPU config, use the appropriate config file as input to the runner, and rename the model directory appropriately. For instance, to 
 test a CPU:GPU ratio of 4, 
@@ -84,4 +84,4 @@ mv models-4 models
 python runner.py --cluster_job_log trace/cluster_job_log --plot --config_file configs/cluster_4.ini  2>&1 | tee  out.log
 ``
 
-For Fig 12, please set schedulers to [this]().
+For Fig 12, please set schedulers to [this](runner.py#L400).
