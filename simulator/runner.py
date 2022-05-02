@@ -389,51 +389,25 @@ def benchmark(seed, cluster_job_log, use_cache, cache_result, prioritize, plot=F
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
 
-    #schedulers = ['SRTF+tune']
-    #schedulers = ['SRTF+fair', 'SRTF+tune', 'SRTF+opt']
-    #schedulers = ['FTF+fair', 'FTF', 'FTF+tune']
+    # Testing
+    schedulers = ['FIFO+fair']
+    scheduler_name = ['FIFO-Fair']
+
+    # Intro
+    #schedulers = ['LAS+fair' , 'LAS+tune', 'SRTF+fair', 'SRTF+tune']
+    #scheduler_name = ['LAS-Fair', 'LAS-Tune', 'SRTF-Fair', 'SRTF-Tune']
+
     #schedulers = ['TETRIS', 'TETRIS+tune']
-    #schedulers = ['TETRIS', 'TETRIS+tune', 'FIFO+tune', 'FTF+tune']
-    #schedulers = ['DRF', 'DRF+tune']
-    #schedulers = ['DRF', 'DRF+tune', 'FIFO+fair', 'FIFO+tune', 'FTF+fair', 'FTF+tune']
-    #schedulers = ['SRTF+fair', 'SRTF', 'SRTF+tune']
-    #schedulers = ['LAS+fair', 'LAS', 'LAS+tune']
-    #schedulers = ['FIFO+fair', 'FIFO', 'FIFO+tune']
-    #schedulers = ['LAS+place+fair', 'LAS+place', 'LAS+place+tune']
-    #schedulers = ['LAS+place+fair', 'LAS+place', 'LAS+place+tune']
-    #schedulers = ['SRTF+fair', 'SRTF+tune']
-    #schedulers = ['SRTF+fair', 'SRTF+tune', 'FIFO+fair', 'FIFO+tune', 'LAS+fair', 'LAS+tune', 'FTF+fair', 'FTF+tune']
-    #schedulers = ['FIFO+fair']
-    schedulers = ['FIFO+fair' , 'FIFO+tune']
-    #scheduler_name = ['FIFO-Fair']
-    scheduler_name = ['FIFO-Fair', 'FIFO-Tune']
-    #scheduler_name = ['SRTF-fair', 'SRTF-tune', 'FIFO-fair', 'FIFO-tune', 'LAS-fair', 'LAS-tune', 'FTF-fair', 'FTF-tune']
-    #scheduler_name = ['SRTF-fair', 'SRTF-tune']
-    #scheduler_name = ['SRTF-fair', 'SRTF-tune', 'SRTF+opt']
-    #scheduler_name = ['FIFO-Fair', 'FIFO-Greedy', 'FIFO-Tune']
-    #schedulers = ['FIFO+fair', 'LAS+fair', 'FTF+fair']
-    #scheduler_name = ['FIFO', 'LAS', 'FTF']
     #scheduler_name = ['TETRIS', 'TETRIS-tune']
-    #scheduler_name = ['TETRIS', 'TETRIS-tune', 'FIFO-tune', 'FTF-Tune']
+    #schedulers = ['DRF', 'DRF+tune']
     #scheduler_name = ['DRF-Greedy', 'DRF-Tune']
-    #scheduler_name = ['DRF-Greedy', 'DRF-Tune', 'FIFO-fair', 'FIFO-tune', 'FTF-fair', 'FTF-Tune']
-    #scheduler_name = ['FTF-Fair', 'FTF-Greedy', 'FTF-Tune']
-    #scheduler_name = ['SRTF+Fair', 'SRTF+Greedy', 'SRTF+Tune']
-    #scheduler_name = ['LAS+Fair', 'LAS+Greedy', 'LAS+Tune']
-    #scheduler_name = ['Fair', 'Greedy', 'Tune']
-    #scheduler_name = ['FIFO-Fair', 'FIFO-Greedy', 'FIFO-Tune']
-    #scheduler_name = ['LAS-fair', 'LAS-Synergy-Skip', 'LAS-Synergy-Tune']
-    #jobs_per_hours = np.arange(0.5, 5.2, 0.5)
-    #jobs_per_hours = np.arange(0.5, 8.1, 0.5)
+
     jobs_per_hours = np.arange(9.0, 10, 1)
-    #jobs_per_hours = np.arange(7, 7.1, 1)
-    #jobs_per_hours = np.arange(10, 10.1, 1)
-    #jobs_per_hours = np.arange(15, 15.1, 0.5)
-    #class_split=[(0,100,0)]
-    #class_split=[(50,0,50)]
-    #class_split=[(35,60,5)]
+    #jobs_per_hours = np.arange(0.5, 8.5, 0.5)
+    
     class_split=[(20,70,10)]
-    #class_split=[(0,100,0), (15,75,10), (25,50,25), (65,25,10), (50,0,50)]
+    #class_split=[(20,70,10), (33,33,33), (50,0,50)]
+
     agg_total_gpu_demand_collection = DataSeriesCollection()
     agg_job_completion_times_collection = DataSeriesCollection()
 
