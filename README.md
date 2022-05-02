@@ -62,4 +62,6 @@ Other options supported by the test harness are:
 * class split : Split of <vision. language, speech> models, for eg., class_split=[(20,70,10)]
 
 
-Other detailed run instructions are in [README](simulator/README.md) and [README](README-offline-profiler.md)
+Other detailed run instructions are in [scheduler](simulator/README.md) and [profiler](README-offline-profiler.md)
+
+For more detailed instructions on how to reproduce results from the OSDI paper, see [here](ae-readme.md).
