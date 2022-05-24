@@ -1,6 +1,6 @@
 ## Synergy :  Looking Beyond GPUs for DNN Scheduling on Multi-Tenant Clusters
 
-This repository contains the source code implementation of the OSDI paper "Looking Beyond GPUs for DNN Scheduling on Multi-Tenant Clusters".
+This repository contains the source code implementation of the OSDI paper "Looking Beyond GPUs for DNN Scheduling on Multi-Tenant Clusters". This work was done as part of Microsoft Research's Project Fiddle. This source code is available under the MIT License.
 
 ### Directory Structure
 
