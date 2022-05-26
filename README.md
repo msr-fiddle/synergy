@@ -11,7 +11,7 @@ This contains code for the Synergy scheduler, that includes various scheduling p
 This contains the src code for offline profiling alongside a detailed [README](README-offline-profiler.md) that discusses how to use it.
 
 ### Setup
-Please install the following dependencies before proceeding.
+Please install the following dependencies before proceeding. Tested on Python 3.6.8 and 3.8.10
 
 #### Setup profiler
 ```
@@ -23,9 +23,8 @@ Please install the following dependencies before proceeding.
 ```
 - cd deployment
 - ./upgrade_pip.sh
-- make
-- cd ..
 - pip install -r requirements.txt
+- make
 ```
 
 #### Setup iterator
