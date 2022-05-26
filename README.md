@@ -31,6 +31,7 @@ Please install the following dependencies before proceeding. Tested on Python 3.
 Synergy uses its own PyTorch iterator that is built on top of DALI & CoorDL. So before you run any profiling experiment, or deployment in a real GPU cluster,  build a docker container with this iterator support by following these steps. Note that this is not required to run the simulation experiments.
 ```
 - git clone https://github.com/jayashreemohan29/Synergy-CoorDL.git
+- git submodule sync --recursive && git submodule update --init --recursive
 - git checkout iterator_chk
 - cd docker
 - CREATE_RUNNER="YES" ./build.sh
