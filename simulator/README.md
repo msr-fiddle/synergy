@@ -17,12 +17,13 @@ Create a config file in $ROOT/configs such as  configs/config_file.ini
      decisions will be made based on these metrics.
 
 ## Prereq
+
+Tested on Python version 3.6.8 and 3.8
 ```
 - cd deployment
 - ./upgrade_pip.sh
-- make
-- cd ..
 - pip install -r requirements.txt
+- make
 ```
 
 ### Simulation
