@@ -51,7 +51,7 @@ After each run, the directry `plots`contains the corresponding plots of `avg JCT
 the evaluation in the paper. The `cache` directory contains the results from the run for each configuration, should you rerun the experiment to plot different combinations of schedulers, stats from previously cached runs will be used. Use `--no_use_cache`if you want to force rerun the config, and `--no_cache_result' to disable caching. 
 
 ### Fig 1 (Average JCT with Synergy)
-To reproduce the intro result (Fig 1), uncomment the appropriate [scheduler](simulator/runner.py#L397) and [load](simulator/runner.py#L406) arguments in `runner.py` and execute the runner in the same way as above. The resultant graph is in `plots/avg_jct_vs_load.png`
+To reproduce the intro result (Fig 1), uncomment the appropriate [scheduler](simulator/runner.py#L397) and [load](simulator/runner.py#L406) arguments in `runner.py` and execute the runner in the same way as above with an additional `--multigpu` option. The resultant graph is in `plots/avg_jct_vs_load.png`
 
 ### Philly trace evaluation
 By default, the simulation uses a philly-derived trace as explained in the paper. To evaluate a larger cluster with the arrival times and gpu load as in the
