@@ -11,6 +11,20 @@ This contains code for the Synergy scheduler, that includes various scheduling p
 This contains the src code for offline profiling alongside a detailed [README](README-offline-profiler.md) that discusses how to use it.
 
 ### Setup
+
+#### Option 1
+
+Use the docker image `jayashreemohan/synergy_dali`.
+```
+- docker pull jayashreemohan/synergy_dali:latest
+- nvidia-docker run --ipc=host --mount src=/,target=/datadrive/,type=bind -it --rm --network=host --privileged jayashreemohan/synergy_dali:latest /bin/bash
+- git clone https://github.com/msr-fiddle/synergy.git
+- cd synergy/simulator/deployment
+- make
+```
+Now skip to [Getting Started](README.md#getting-started)
+
+#### Option 2 :  Building from scratch
 Please install the following dependencies before proceeding. Tested on Python 3.6.8 and 3.8.10
 
 #### Setup profiler
@@ -21,7 +35,7 @@ Please install the following dependencies before proceeding. Tested on Python 3.
 
 #### Setup simulator
 ```
-- cd deployment
+- cd simulator/deployment
 - ./upgrade_pip.sh
 - pip install -r requirements.txt
 - make
