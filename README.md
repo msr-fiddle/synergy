@@ -39,6 +39,10 @@ Synergy uses its own PyTorch iterator that is built on top of DALI & CoorDL. So 
 ```
  This will create a docker container tagged nvidia/dali:py36_cu10.run
 
+Alternately you could use the docker image hosted [here](https://hub.docker.com/repository/docker/jayashreemohan/synergy_dali) using :
+```
+docker pull jayashreemohan/synergy_dali:latest
+```
 
 ### Getting Started
 The simplest way to get started with Synergy, is to test it out in a simulated cluster (can be run on a local machine without GPUs, or any specific hardware requirement). The test harness is the [runner.py](simulator/runner.py) file. For instance, to evaluate a FIFO scheduling policy using the default GPU-proportional allocation and synergy's tune based allocation, run the following command:
