@@ -64,6 +64,7 @@ The simplest way to get started with Synergy, is to test it out in a simulated c
 ```
 python runner.py --cluster_job_log trace/cluster_job_log --plot  2>&1 | tee  out-deploy
 ```
+Note that, each combination may take upto 5 minutes to complete simulation.
 
 Other options supported by the test harness are:
 
